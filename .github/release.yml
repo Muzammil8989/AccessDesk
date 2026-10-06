@@ -1,0 +1,20 @@
+# Groups the notes GitHub generates when you create a release ("Generate release notes").
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+    authors:
+      - dependabot
+  categories:
+    - title: Security
+      labels: [security]
+    - title: Features
+      labels: [enhancement, feature]
+    - title: Bug fixes
+      labels: [bug]
+    - title: Documentation
+      labels: [documentation]
+    - title: Dependencies
+      labels: [dependencies]
+    - title: Other changes
+      labels: ['*']

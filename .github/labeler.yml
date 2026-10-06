@@ -1,0 +1,54 @@
+# Used by .github/workflows/labeler.yml to label pull requests by the files they change.
+desktop:
+  - changed-files:
+      - any-glob-to-any-file: apps/desktop/**
+
+api:
+  - changed-files:
+      - any-glob-to-any-file: apps/api/**
+
+keycloak-client:
+  - changed-files:
+      - any-glob-to-any-file: packages/keycloak-client/**
+
+shared:
+  - changed-files:
+      - any-glob-to-any-file: packages/shared/**
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - '*.md'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/test/**'
+          - '**/*.test.ts'
+          - '**/*.test.tsx'
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - package.json
+          - '**/package.json'
+          - pnpm-lock.yaml
+
+# Files that run code in CI or on a contributor's machine. Review these with extra care.
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - .husky/**
+          - scripts/**
+          - turbo.json
+          - docker-compose.yml
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - SECURITY.md
+          - docs/security.md
+          - apps/desktop/src/main/**
+          - apps/api/src/plugins/**

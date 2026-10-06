@@ -1,0 +1,93 @@
+name: Security enforcement
+
+# Runs after "Security gate" finishes. If a pull request leaked a secret or added a dependency with a
+# high or critical vulnerability, it is labeled and, for outside contributors, closed with an
+# explanation. The pull request can be reopened after the problem is fixed.
+#
+# SECURITY: this workflow runs with write access, so it must never check out or run code from the
+# pull request. It only reads a small text file and calls the GitHub API.
+on:
+  workflow_run:
+    workflows: ['Security gate']
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  enforce:
+    name: Label and close risky pull requests
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: security-gate-result
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: result
+
+      - name: Label, comment and close
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+
+          # The result file comes from the pull request's own run, so treat it as untrusted text.
+          pr=$(tr -dc '0-9' < result/pr-number | head -c 10)
+          [ -n "$pr" ] || { echo 'No pull request number.'; exit 0; }
+
+          secrets=$(grep -m1 -E '^secrets=(success|failure|cancelled|skipped)$' result/result.env | cut -d= -f2 || true)
+          deps=$(grep -m1 -E '^dependencies=(success|failure|cancelled|skipped)$' result/result.env | cut -d= -f2 || true)
+          if [ "$secrets" != failure ] && [ "$deps" != failure ]; then
+            echo 'No real security failure (the run may have been cancelled). Nothing to do.'
+            exit 0
+          fi
+
+          state=$(gh pr view "$pr" --json state --jq .state)
+          head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
+          author=$(gh pr view "$pr" --json author --jq .author.login)
+          assoc=$(gh pr view "$pr" --json authorAssociation --jq .authorAssociation)
+
+          # Only act on the exact commit that was checked. A forged result for another pull request
+          # would not match, and a newer push gets its own check.
+          [ "$state" = OPEN ] || { echo 'Pull request is not open.'; exit 0; }
+          [ "$head" = "$HEAD_SHA" ] || { echo 'Pull request has newer commits. Skipping.'; exit 0; }
+
+          gh label create security-risk --color B60205 \
+            --description 'Failed the automatic security checks' 2>/dev/null || true
+          gh pr edit "$pr" --add-label security-risk
+
+          reasons=''
+          if [ "$secrets" = failure ]; then
+            reasons="$reasons"$'\n'"- **Possible secret or sensitive file** (a key, token, password or .env file) in the commits."
+          fi
+          if [ "$deps" = failure ]; then
+            reasons="$reasons"$'\n'"- **A dependency with a known high or critical vulnerability** was added or updated to a vulnerable version."
+          fi
+
+          # Maintainers and bots are told but not closed, so a false alarm never blocks the project.
+          case "$assoc" in
+            OWNER|MEMBER|COLLABORATOR) protected=yes ;;
+            *) protected=no ;;
+          esac
+          [ "$author" = 'dependabot[bot]' ] && protected=yes
+
+          if [ "$protected" = yes ]; then
+            gh pr comment "$pr" --body "**Security check failed.** A maintainer needs to look at this before it is merged.${reasons}"$'\n\n'"Details: ${RUN_URL}"
+            exit 0
+          fi
+
+          body="Thanks for the contribution. This pull request failed the automatic security checks, so it was closed:${reasons}"$'\n\n'
+          body="${body}**If a secret was committed, treat it as exposed and rotate it now.** Removing it in a later commit does not remove it from the history. Rewrite the branch history so the secret is gone, or open a new pull request from a clean branch."$'\n\n'
+          body="${body}Fix the problem and push, or ask a maintainer to reopen this pull request if you think it is a false alarm. Details: ${RUN_URL}"
+          gh pr comment "$pr" --body "$body"
+          gh pr close "$pr"

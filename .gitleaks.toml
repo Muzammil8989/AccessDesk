@@ -1,0 +1,16 @@
+title = "AccessDesk gitleaks config"
+
+# Start from gitleaks' built-in rules (API keys, tokens, private keys, and so on).
+[extend]
+useDefault = true
+
+# Things that look like secrets but are not.
+[[allowlists]]
+description = "Placeholder values and generated files"
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)pnpm-lock\.yaml$''',
+]
+regexes = [
+  '''change-me''',
+]

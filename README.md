@@ -1,5 +1,12 @@
 # AccessDesk
 
+[![CI](https://github.com/Muzammil8989/AccessDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Muzammil8989/AccessDesk/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Muzammil8989/AccessDesk/actions/workflows/codeql.yml/badge.svg)](https://github.com/Muzammil8989/AccessDesk/actions/workflows/codeql.yml)
+[![Security gate](https://github.com/Muzammil8989/AccessDesk/actions/workflows/security.yml/badge.svg)](https://github.com/Muzammil8989/AccessDesk/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Muzammil8989/AccessDesk/badge)](https://scorecard.dev/viewer/?uri=github.com/Muzammil8989/AccessDesk)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 Open source desktop app (a web build will follow) that lets an HR or IT admin **onboard and offboard
 employees** using [Keycloak](https://www.keycloak.org/).
 
@@ -137,6 +144,23 @@ conventions are in [docs/development.md](docs/development.md). Each app and pack
   role such as `view-users`, or lacks `super-admin` / `hr-admin`.
 - **Linux:** secure storage needs a running keyring (libsecret). Without it the session lasts until
   you quit the app.
+
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: fork, branch, run
+`pnpm check`, open a pull request. For anything big, open an issue before you start. Look for issues
+labeled `good first issue`.
+
+- Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+- Need help? See [SUPPORT.md](SUPPORT.md).
+- Every pull request goes through automatic checks (lint, tests, CodeQL, a secret scan and a
+  dependency review). A pull request from an outside contributor that leaks a secret or adds a
+  vulnerable dependency is closed automatically with an explanation.
+
+## Security
+
+Do not report vulnerabilities in public issues. Use GitHub's private vulnerability reporting. See
+[SECURITY.md](SECURITY.md).
 
 ## License
 

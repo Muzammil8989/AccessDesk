@@ -1,0 +1,20 @@
+# Code owners are asked to review every pull request that touches their files.
+# Turn on "Require review from Code Owners" in the branch ruleset to make it mandatory.
+
+# Default owner for everything.
+*                       @Muzammil8989
+
+# Files that run code in CI or on a contributor's machine, or that define the security model.
+# Look at these changes with extra care.
+/.github/               @Muzammil8989
+/.husky/                @Muzammil8989
+/scripts/               @Muzammil8989
+/package.json           @Muzammil8989
+/pnpm-lock.yaml         @Muzammil8989
+/.npmrc                 @Muzammil8989
+/docker-compose.yml     @Muzammil8989
+/SECURITY.md            @Muzammil8989
+/docs/security.md       @Muzammil8989
+/apps/desktop/src/main/ @Muzammil8989
+/apps/api/src/plugins/  @Muzammil8989
+/packages/keycloak-client/ @Muzammil8989
