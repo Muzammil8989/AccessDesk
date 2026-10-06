@@ -1,0 +1,23 @@
+# Local development database only. Keycloak is NOT part of this file: it is
+# already running elsewhere and AccessDesk reads its settings from env vars.
+services:
+  postgres:
+    image: postgres:16.15
+    container_name: accessdesk-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: accessdesk
+      POSTGRES_USER: accessdesk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - accessdesk_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U accessdesk -d accessdesk']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  accessdesk_pgdata:

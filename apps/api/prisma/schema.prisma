@@ -1,0 +1,161 @@
+// AccessDesk app data only. Identity (users, roles, groups, sessions, login events)
+// stays in Keycloak. Employees are referenced by their Keycloak user ID (`sub`);
+// we never copy names or emails here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ItemKind {
+  GROUP_MEMBERSHIP
+  REALM_ROLE
+  MANUAL_TASK
+}
+
+enum ChecklistType {
+  ONBOARDING
+  OFFBOARDING
+}
+
+enum ChecklistStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+enum ChecklistItemStatus {
+  PENDING
+  DONE
+  SKIPPED
+  FAILED
+}
+
+enum ScheduledActionType {
+  DISABLE_USER
+  LOGOUT_ALL_SESSIONS
+  REMOVE_ALL_ACCESS
+}
+
+enum ScheduledActionStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+model OnboardingTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  items      TemplateItem[]
+  checklists EmployeeChecklist[]
+
+  @@map("onboarding_templates")
+}
+
+model TemplateItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  templateId  String   @map("template_id") @db.Uuid
+  title       String
+  description String?
+  kind        ItemKind
+  // Group path or realm role name this item applies; empty for manual tasks.
+  targetRef   String?  @map("target_ref")
+  position    Int
+
+  template OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, position])
+  @@map("template_items")
+}
+
+model EmployeeChecklist {
+  id             String          @id @default(uuid()) @db.Uuid
+  // Keycloak user ID (`sub`) of the employee.
+  keycloakUserId String          @map("keycloak_user_id")
+  templateId     String?         @map("template_id") @db.Uuid
+  type           ChecklistType
+  status         ChecklistStatus @default(OPEN)
+  // Keycloak user ID of the admin who started it.
+  createdBy      String          @map("created_by")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  completedAt    DateTime?       @map("completed_at")
+
+  template OnboardingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  items    ChecklistItem[]
+
+  @@index([keycloakUserId])
+  @@map("employee_checklists")
+}
+
+model ChecklistItem {
+  id          String              @id @default(uuid()) @db.Uuid
+  checklistId String              @map("checklist_id") @db.Uuid
+  title       String
+  description String?
+  kind        ItemKind
+  targetRef   String?             @map("target_ref")
+  status      ChecklistItemStatus @default(PENDING)
+  position    Int
+  completedAt DateTime?           @map("completed_at")
+  completedBy String?             @map("completed_by")
+
+  checklist EmployeeChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@unique([checklistId, position])
+  @@map("checklist_items")
+}
+
+model ScheduledAction {
+  id             String                @id @default(uuid()) @db.Uuid
+  keycloakUserId String                @map("keycloak_user_id")
+  action         ScheduledActionType
+  runAt          DateTime              @map("run_at")
+  status         ScheduledActionStatus @default(PENDING)
+  createdBy      String                @map("created_by")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  executedAt     DateTime?             @map("executed_at")
+  lastError      String?               @map("last_error")
+
+  @@index([status, runAt])
+  @@index([keycloakUserId])
+  @@map("scheduled_actions")
+}
+
+// What an employee had at the moment of offboarding, kept for audit and access reviews.
+// Group paths and role names only. No personal data.
+model OffboardingSnapshot {
+  id             String   @id @default(uuid()) @db.Uuid
+  keycloakUserId String   @map("keycloak_user_id")
+  groups         Json     @default("[]")
+  realmRoles     Json     @default("[]") @map("realm_roles")
+  createdBy      String   @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([keycloakUserId])
+  @@map("offboarding_snapshots")
+}
+
+// AccessDesk's own audit trail. Keycloak keeps its own event log separately.
+// Never put tokens, passwords or personal data in `details`.
+model AppAuditLog {
+  id                   String   @id @default(uuid()) @db.Uuid
+  actorId              String   @map("actor_id")
+  action               String
+  targetKeycloakUserId String?  @map("target_keycloak_user_id")
+  details              Json?
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([targetKeycloakUserId])
+  @@index([createdAt])
+  @@map("app_audit_log")
+}

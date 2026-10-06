@@ -1,0 +1,52 @@
+{
+  "name": "accessdesk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open source desktop app for onboarding and offboarding employees with Keycloak",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.9.1",
+  "engines": {
+    "node": ">=22.22.1"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "turbo run dev",
+    "dev:all": "node scripts/dev-all.mjs",
+    "build": "turbo run build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "test:e2e": "pnpm build && pnpm --filter @accessdesk/desktop test:e2e",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @accessdesk/api db:migrate",
+    "clean": "node scripts/clean.mjs",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,mjs,cjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml,css}": "prettier --write"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.12.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "husky": "9.1.7",
+    "lint-staged": "17.6.0",
+    "prettier": "3.9.9",
+    "turbo": "2.11.7",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1"
+  }
+}

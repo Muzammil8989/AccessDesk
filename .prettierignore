@@ -1,0 +1,8 @@
+node_modules
+dist
+out
+.turbo
+coverage
+pnpm-lock.yaml
+apps/api/src/generated
+apps/api/prisma/migrations
