@@ -1,0 +1,20 @@
+name: Label pull requests
+
+# pull_request_target gives write access even for fork pull requests. That is safe here because this
+# workflow never checks out or runs the pull request's code. It only reads the labeler config from
+# the base branch.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v7
+        with:
+          sync-labels: true

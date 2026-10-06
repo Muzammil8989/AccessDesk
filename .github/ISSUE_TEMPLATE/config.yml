@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/Muzammil8989/AccessDesk/security/advisories/new
+    about: Please do not open a public issue for security problems.
+  - name: Ask a question
+    url: https://github.com/Muzammil8989/AccessDesk/blob/main/SUPPORT.md
+    about: Read how to get help before opening an issue.

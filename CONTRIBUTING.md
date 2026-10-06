@@ -2,7 +2,21 @@
 
 Thanks for helping. This is the short version. See [docs/development.md](docs/development.md) for details.
 
+By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Questions go to
+[SUPPORT.md](SUPPORT.md).
+
+## Ways to help
+
+- Report a bug or suggest a feature with an [issue](../../issues/new/choose). Search first.
+- Fix a bug or build something. For anything bigger than a small fix, **open an issue first** so we can agree on the approach before you spend time on it.
+- Improve the docs, or add tests.
+- Look for issues labeled `good first issue` or `help wanted`.
+
 ## Getting set up
+
+1. [Fork](../../fork) the repository and clone your fork.
+2. Create a branch from `main` (for example `fix/employee-search`).
+3. Install and run:
 
 ```bash
 pnpm install
@@ -35,6 +49,24 @@ Git hooks (Husky) help: pre-commit lints and formats staged files, and pre-push 
 
 - Small, focused pull requests. Describe what changed and why, and how you tested it.
 - Use clear commit messages in the imperative: "Add employee detail route".
+- Open the pull request against `main` from your fork's branch and fill in the template.
+- A maintainer reviews every pull request. `main` is protected, so a pull request needs passing checks
+  and an approval before it is merged. Expect requests for changes. They are normal.
+- Resolve review conversations and keep the branch up to date with `main`.
+- Never commit secrets (passwords, tokens, keys, `.env` files). Use `.env.example` for placeholders.
+
+### Automatic security checks
+
+Every pull request runs a security gate:
+
+- **Secret scan** ([gitleaks](https://github.com/gitleaks/gitleaks)) on the pull request's commits.
+- **Dependency review** that fails if you add a dependency with a known high or critical vulnerability.
+- **CodeQL** code scanning and **`pnpm audit`** (in CI).
+
+If the secret scan or dependency review fails, a pull request from an outside contributor is labeled
+`security-risk` and **closed automatically** with an explanation. Fix the problem and push, or ask a
+maintainer to reopen it if you think it is a false alarm. If you committed a real secret, **rotate it
+immediately**. Deleting it in a new commit does not remove it from the history.
 
 ## Reporting security problems
 
