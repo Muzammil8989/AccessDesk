@@ -1,0 +1,83 @@
+import path from 'node:path';
+import dotenv from 'dotenv';
+import { createPrisma } from '../src/infra/db';
+import type { ItemKind } from '../src/generated/prisma/client';
+
+dotenv.config({ path: path.resolve(import.meta.dirname, '../../../.env'), quiet: true });
+
+interface SeedItem {
+  title: string;
+  kind: ItemKind;
+  targetRef?: string;
+  description?: string;
+}
+
+// targetRef values are examples. Adjust them to the groups and roles in your realm.
+const templates: { name: string; description: string; items: SeedItem[] }[] = [
+  {
+    name: 'Developer',
+    description: 'Engineering hires: source control, CI and internal tooling.',
+    items: [
+      { title: 'Add to Engineering group', kind: 'GROUP_MEMBERSHIP', targetRef: '/Engineering' },
+      { title: 'Assign developer role', kind: 'REALM_ROLE', targetRef: 'developer' },
+      { title: 'Order laptop', kind: 'MANUAL_TASK', description: 'Standard developer spec.' },
+      { title: 'Schedule security awareness training', kind: 'MANUAL_TASK' },
+    ],
+  },
+  {
+    name: 'Sales',
+    description: 'Sales hires: CRM and customer-facing tools.',
+    items: [
+      { title: 'Add to Sales group', kind: 'GROUP_MEMBERSHIP', targetRef: '/Sales' },
+      { title: 'Assign sales role', kind: 'REALM_ROLE', targetRef: 'sales' },
+      { title: 'Create CRM account', kind: 'MANUAL_TASK' },
+    ],
+  },
+  {
+    name: 'HR',
+    description: 'HR hires: people systems and confidential records.',
+    items: [
+      { title: 'Add to HR group', kind: 'GROUP_MEMBERSHIP', targetRef: '/HR' },
+      { title: 'Assign hr-admin role', kind: 'REALM_ROLE', targetRef: 'hr-admin' },
+      { title: 'Sign confidentiality agreement', kind: 'MANUAL_TASK' },
+    ],
+  },
+];
+
+async function main() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is not set');
+  const prisma = createPrisma(url);
+
+  try {
+    for (const t of templates) {
+      // Re-running the seed resets the items of these templates to the values above.
+      await prisma.$transaction(async (tx) => {
+        const template = await tx.onboardingTemplate.upsert({
+          where: { name: t.name },
+          update: { description: t.description },
+          create: { name: t.name, description: t.description },
+        });
+        await tx.templateItem.deleteMany({ where: { templateId: template.id } });
+        await tx.templateItem.createMany({
+          data: t.items.map((item, position) => ({
+            templateId: template.id,
+            title: item.title,
+            kind: item.kind,
+            targetRef: item.targetRef ?? null,
+            description: item.description ?? null,
+            position,
+          })),
+        });
+      });
+    }
+    console.log(`Seeded ${templates.length} templates`);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
