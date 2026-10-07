@@ -14,5 +14,5 @@
 - [ ] `pnpm check` passes
 - [ ] New behavior has tests in the relevant `test/` folder
 - [ ] No tokens, passwords or personal data are logged or stored
-- [ ] Keycloak Admin calls are only in `packages/keycloak-client`
+- [ ] Identity provider admin calls are only in an adapter package (`packages/identity-*`), and names stay neutral (`pnpm check:naming`)
 - [ ] Docs updated if behavior or setup changed

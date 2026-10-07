@@ -11,10 +11,8 @@ import { FormField } from '@/components/ui/form-field';
 
 type FormInput = z.input<typeof appSettingsSchema>;
 
-// Public values that match .env.example. Nothing secret is ever asked for here.
 const DEFAULTS: FormInput = {
-  keycloakUrl: 'http://localhost:8080',
-  realm: 'company-platform',
+  issuerUrl: 'http://localhost:8080/realms/company-platform',
   clientId: 'accessdesk',
   apiUrl: 'http://localhost:4000',
 };
@@ -40,7 +38,6 @@ export function SettingsForm({ initial, submitLabel, onSaved }: SettingsFormProp
     setSaveError(null);
     const result = await window.accessdesk.settings.save(values);
     if (!result.ok) return setSaveError(result.message);
-    // Changing realm or client signs the user out, so refresh everything that depends on it.
     await queryClient.invalidateQueries();
     onSaved?.(result.settings);
   }
@@ -63,18 +60,11 @@ export function SettingsForm({ initial, submitLabel, onSaved }: SettingsFormProp
       noValidate
     >
       <FormField
-        id="keycloakUrl"
-        label="Keycloak URL"
-        hint="Where your Keycloak server is reachable, for example https://sso.example.com"
-        error={errors.keycloakUrl}
-        {...form.register('keycloakUrl')}
-      />
-      <FormField
-        id="realm"
-        label="Realm"
-        error={errors.realm}
-        autoComplete="off"
-        {...form.register('realm')}
+        id="issuerUrl"
+        label="Issuer URL"
+        hint="The OpenID Connect issuer of your identity provider, for example https://sso.example.com/realms/company"
+        error={errors.issuerUrl}
+        {...form.register('issuerUrl')}
       />
       <FormField
         id="clientId"

@@ -32,7 +32,8 @@ Git hooks (Husky) help: pre-commit lints and formats staged files, and pre-push 
 ## Rules
 
 - TypeScript strict mode. No `any` without a comment explaining why.
-- Keycloak Admin API calls live only in `packages/keycloak-client`.
+- Identity provider admin API calls live only in an adapter package (`packages/identity-*`), and the
+  provider name appears only where `scripts/naming-allowlist.json` allows. `pnpm check` enforces both.
 - Validate all external input with Zod (API requests, IPC payloads, settings, API responses).
 - Never log or store tokens or passwords. See [docs/security.md](docs/security.md).
 - New behavior needs a test in the `test/` folder of the app or package you changed. Fixing a bug starts

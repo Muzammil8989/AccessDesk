@@ -14,8 +14,7 @@ import type {
 } from '../../../../src/shared/ipc';
 
 export const settings: AppSettings = {
-  keycloakUrl: 'http://localhost:8080',
-  realm: 'company-platform',
+  issuerUrl: 'http://localhost:8080/realms/company-platform',
   clientId: 'accessdesk',
   apiUrl: 'http://localhost:4000',
 };
@@ -25,6 +24,7 @@ export const adminAuth: AuthStatus = {
   username: 'hana',
   displayName: 'Hana HR',
   roles: ['hr-admin', 'offline_access'],
+  adminRoles: ['super-admin', 'hr-admin'],
   persistent: true,
 };
 
@@ -33,6 +33,7 @@ export const memberAuth: AuthStatus = {
   username: 'member1',
   displayName: 'Member One',
   roles: ['offline_access', 'default-roles-company-platform'],
+  adminRoles: ['super-admin', 'hr-admin'],
   persistent: true,
 };
 
@@ -41,6 +42,7 @@ export const signedOut: AuthStatus = {
   username: null,
   displayName: null,
   roles: [],
+  adminRoles: ['super-admin', 'hr-admin'],
   persistent: true,
 };
 
@@ -53,7 +55,6 @@ export interface FakeApiOptions {
   testConnection?: (input: unknown) => Promise<ConnectionTestResult>;
 }
 
-/** Replaces the preload bridge (window.accessdesk) with controllable fakes. */
 export function installFakeApi(options: FakeApiOptions = {}) {
   let auth = options.auth ?? adminAuth;
   const api = {
@@ -89,7 +90,6 @@ export function installFakeApi(options: FakeApiOptions = {}) {
 }
 
 function newQueryClient() {
-  // No retries: a failing request should fail the test immediately, not after backoff.
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 

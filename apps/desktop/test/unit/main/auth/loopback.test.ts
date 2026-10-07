@@ -44,7 +44,7 @@ describe('loopback redirect listener', () => {
     await expect(s.result).rejects.toBeInstanceOf(LoginCancelledError);
   });
 
-  it('rejects when Keycloak returns an error', async () => {
+  it('rejects when the identity provider returns an error', async () => {
     const s = await start();
     await fetch(`${s.redirectUri}?error=access_denied&state=good-state`);
     await expect(s.result).rejects.toThrow('access_denied');
@@ -57,8 +57,6 @@ describe('loopback redirect listener', () => {
     await expect(fetch(`${s.redirectUri}?code=twice&state=good-state`)).rejects.toThrow();
   });
 
-  // Regression: a browser reusing its connection (favicon, retry) after sign-in finished used to
-  // crash the main process with "Cannot read properties of null (reading 'port')".
   it('answers a second request on the same connection without crashing', async () => {
     const s = await start();
     const port = new URL(s.redirectUri).port;

@@ -17,24 +17,33 @@ describe('listEmployeesQuerySchema', () => {
 });
 
 describe('appSettingsSchema', () => {
+  const valid = {
+    issuerUrl: 'http://localhost:8080/realms/company-platform',
+    clientId: 'accessdesk',
+    apiUrl: 'http://localhost:4000',
+  };
+
   it('trims trailing slashes from URLs', () => {
     const parsed = appSettingsSchema.parse({
-      keycloakUrl: 'http://localhost:8080/',
-      realm: 'company-platform',
-      clientId: 'accessdesk',
+      ...valid,
+      issuerUrl: 'http://localhost:8080/realms/company-platform/',
       apiUrl: 'http://localhost:4000//',
     });
-    expect(parsed.keycloakUrl).toBe('http://localhost:8080');
+    expect(parsed.issuerUrl).toBe('http://localhost:8080/realms/company-platform');
     expect(parsed.apiUrl).toBe('http://localhost:4000');
   });
 
-  it('rejects a realm that could alter a URL path', () => {
-    const result = appSettingsSchema.safeParse({
-      keycloakUrl: 'http://localhost:8080',
-      realm: '../master',
-      clientId: 'accessdesk',
-      apiUrl: 'http://localhost:4000',
-    });
-    expect(result.success).toBe(false);
+  it.each([
+    'http://localhost:8080/realms/x?next=//evil.test',
+    'http://localhost:8080/realms/x#frag',
+    'http://user:pass@localhost:8080/realms/x',
+    'ftp://localhost:8080/realms/x',
+    'not a url',
+  ])('rejects an issuer URL that could redirect or leak (%s)', (issuerUrl) => {
+    expect(appSettingsSchema.safeParse({ ...valid, issuerUrl }).success).toBe(false);
+  });
+
+  it('rejects a client ID that could alter a URL', () => {
+    expect(appSettingsSchema.safeParse({ ...valid, clientId: 'a/b?c' }).success).toBe(false);
   });
 });

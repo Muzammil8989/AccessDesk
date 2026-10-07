@@ -1,3 +1,4 @@
+import type { AccessPolicy } from '@accessdesk/identity';
 import type { AppSettings } from '@accessdesk/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryTokenStorage } from '../helpers/memory-token-storage';
@@ -5,22 +6,25 @@ import { discover, OidcError } from '../../../../src/main/auth/oidc';
 import { createCodeChallenge } from '../../../../src/main/auth/pkce';
 import { AuthService } from '../../../../src/main/auth/service';
 
+const ISSUER = 'http://idp.test/realms/company-platform';
 const settings: AppSettings = {
-  keycloakUrl: 'http://kc.test',
-  realm: 'company-platform',
+  issuerUrl: ISSUER,
   clientId: 'accessdesk',
   apiUrl: 'http://localhost:4000',
 };
-const ISSUER = 'http://kc.test/realms/company-platform';
+const policy: AccessPolicy = {
+  adminRoles: ['super-admin', 'hr-admin'],
+  rolesClaimPath: 'realm_access.roles',
+};
 
 const jwt = (claims: object) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`;
 
-interface FakeKeycloakOptions {
+interface FakeProviderOptions {
   issuer?: string;
   tokenResponses?: Response[];
 }
 
-function fakeKeycloak(options: FakeKeycloakOptions = {}) {
+function fakeProvider(options: FakeProviderOptions = {}) {
   const tokenCalls: URLSearchParams[] = [];
   const logoutCalls: URLSearchParams[] = [];
   const queue = [...(options.tokenResponses ?? [])];
@@ -30,9 +34,9 @@ function fakeKeycloak(options: FakeKeycloakOptions = {}) {
     if (url.endsWith('/.well-known/openid-configuration')) {
       return Response.json({
         issuer: options.issuer ?? ISSUER,
-        authorization_endpoint: `${ISSUER}/protocol/openid-connect/auth`,
-        token_endpoint: `${ISSUER}/protocol/openid-connect/token`,
-        end_session_endpoint: `${ISSUER}/protocol/openid-connect/logout`,
+        authorization_endpoint: `${ISSUER}/authorize`,
+        token_endpoint: `${ISSUER}/token`,
+        end_session_endpoint: `${ISSUER}/logout`,
       });
     }
     if (url.endsWith('/token')) {
@@ -63,6 +67,7 @@ function makeService(
 ) {
   return new AuthService({
     getSettings: async () => settings,
+    policy,
     tokenStore: new MemoryTokenStorage(),
     openExternal,
     fetch: fetchFn,
@@ -77,10 +82,9 @@ describe('login (authorization code + PKCE, system browser, loopback redirect)',
       name: 'Hana HR',
       realm_access: { roles: ['hr-admin'] },
     });
-    const kc = fakeKeycloak({ tokenResponses: [tokenResponse(access)] });
+    const kc = fakeProvider({ tokenResponses: [tokenResponse(access)] });
     let authUrl!: URL;
 
-    // Plays the part of the user's browser: follow the redirect back to the loopback listener.
     const service = makeService(kc.fetchFn, async (url) => {
       authUrl = new URL(url);
       const redirect = new URL(authUrl.searchParams.get('redirect_uri')!);
@@ -94,9 +98,10 @@ describe('login (authorization code + PKCE, system browser, loopback redirect)',
       username: 'hana',
       displayName: 'Hana HR',
       roles: ['hr-admin'],
+      adminRoles: ['super-admin', 'hr-admin'],
     });
 
-    expect(authUrl.origin + authUrl.pathname).toBe(`${ISSUER}/protocol/openid-connect/auth`);
+    expect(authUrl.origin + authUrl.pathname).toBe(`${ISSUER}/authorize`);
     expect(authUrl.searchParams.get('response_type')).toBe('code');
     expect(authUrl.searchParams.get('client_id')).toBe('accessdesk');
     expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256');
@@ -108,7 +113,6 @@ describe('login (authorization code + PKCE, system browser, loopback redirect)',
     expect(form.get('grant_type')).toBe('authorization_code');
     expect(form.get('code')).toBe('the-code');
     expect(form.get('redirect_uri')).toBe(authUrl.searchParams.get('redirect_uri'));
-    // The verifier sent now must hash to the challenge sent in the browser URL.
     expect(createCodeChallenge(form.get('code_verifier')!)).toBe(
       authUrl.searchParams.get('code_challenge'),
     );
@@ -116,11 +120,10 @@ describe('login (authorization code + PKCE, system browser, loopback redirect)',
   });
 
   it('can be cancelled while waiting for the browser', async () => {
-    const kc = fakeKeycloak();
+    const kc = fakeProvider();
     const opened = vi.fn(async () => {});
     const service = makeService(kc.fetchFn, opened);
     const login = service.login();
-    // Once the browser has been opened, the loopback listener is up and waiting.
     await vi.waitFor(() => expect(opened).toHaveBeenCalled());
     service.cancelLogin();
     await expect(login).rejects.toThrow('cancelled');
@@ -129,6 +132,7 @@ describe('login (authorization code + PKCE, system browser, loopback redirect)',
   it('refuses to start without settings', async () => {
     const service = new AuthService({
       getSettings: async () => null,
+      policy,
       tokenStore: new MemoryTokenStorage(),
       openExternal: async () => {},
     });
@@ -137,7 +141,7 @@ describe('login (authorization code + PKCE, system browser, loopback redirect)',
 });
 
 describe('token lifetime', () => {
-  async function signedInService(kc: ReturnType<typeof fakeKeycloak>, clock: { now: number }) {
+  async function signedInService(kc: ReturnType<typeof fakeProvider>, clock: { now: number }) {
     const service = makeService(
       kc.fetchFn,
       async (url) => {
@@ -154,7 +158,7 @@ describe('token lifetime', () => {
 
   it('returns the stored token while it is fresh', async () => {
     const clock = { now: 1_000_000 };
-    const kc = fakeKeycloak({ tokenResponses: [tokenResponse('access-1')] });
+    const kc = fakeProvider({ tokenResponses: [tokenResponse('access-1')] });
     const service = await signedInService(kc, clock);
     expect(await service.getAccessToken()).toBe('access-1');
     expect(kc.tokenCalls).toHaveLength(1);
@@ -162,12 +166,12 @@ describe('token lifetime', () => {
 
   it('refreshes an expiring token once, even for parallel requests', async () => {
     const clock = { now: 1_000_000 };
-    const kc = fakeKeycloak({
+    const kc = fakeProvider({
       tokenResponses: [tokenResponse('access-1'), tokenResponse('access-2', 'refresh-2')],
     });
     const service = await signedInService(kc, clock);
 
-    clock.now += 290_000; // inside the 30 s safety margin of a 300 s token
+    clock.now += 290_000;
     const results = await Promise.all([service.getAccessToken(), service.getAccessToken()]);
 
     expect(results).toEqual(['access-2', 'access-2']);
@@ -179,7 +183,7 @@ describe('token lifetime', () => {
 
   it('signs the user out when the refresh token is no longer valid', async () => {
     const clock = { now: 1_000_000 };
-    const kc = fakeKeycloak({
+    const kc = fakeProvider({
       tokenResponses: [
         tokenResponse('access-1'),
         Response.json(
@@ -195,9 +199,9 @@ describe('token lifetime', () => {
     expect((await service.status()).authenticated).toBe(false);
   });
 
-  it('keeps the session when Keycloak is only temporarily unreachable', async () => {
+  it('keeps the session when the identity provider is only temporarily unreachable', async () => {
     const clock = { now: 1_000_000 };
-    const kc = fakeKeycloak({ tokenResponses: [tokenResponse('access-1')] });
+    const kc = fakeProvider({ tokenResponses: [tokenResponse('access-1')] });
     const service = await signedInService(kc, clock);
 
     clock.now += 400_000;
@@ -208,8 +212,8 @@ describe('token lifetime', () => {
 });
 
 describe('logout', () => {
-  it('clears the local session and ends the Keycloak session', async () => {
-    const kc = fakeKeycloak({ tokenResponses: [tokenResponse('access-1', 'refresh-1')] });
+  it('clears the local session and ends the identity provider session', async () => {
+    const kc = fakeProvider({ tokenResponses: [tokenResponse('access-1', 'refresh-1')] });
     const service = makeService(kc.fetchFn, async (url) => {
       const u = new URL(url);
       void fetch(
@@ -228,18 +232,67 @@ describe('logout', () => {
 });
 
 describe('discovery', () => {
-  it('rejects a realm whose issuer does not match the configured URL', async () => {
-    const kc = fakeKeycloak({ issuer: 'http://other.test/realms/company-platform' });
+  it('rejects a provider whose issuer does not match the configured URL', async () => {
+    const kc = fakeProvider({ issuer: 'http://other.test/realms/company-platform' });
     await expect(discover(settings, kc.fetchFn)).rejects.toThrow('issuer');
   });
 
   it('reports an unreachable server in plain words', async () => {
     const down = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('fetch failed'));
-    await expect(discover(settings, down)).rejects.toThrow('Could not reach Keycloak');
+    await expect(discover(settings, down)).rejects.toThrow('Could not reach the identity provider');
   });
 
-  it('reports an unknown realm', async () => {
+  it('reports an issuer that serves no OpenID configuration', async () => {
     const notFound = vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 404 }));
-    await expect(discover(settings, notFound)).rejects.toThrow('not found');
+    await expect(discover(settings, notFound)).rejects.toThrow('No OpenID configuration was found');
+  });
+});
+
+describe('roles and the access policy', () => {
+  async function signedInStatus(accessToken: string, customPolicy: AccessPolicy) {
+    const provider = fakeProvider({ tokenResponses: [tokenResponse(accessToken)] });
+    const service = new AuthService({
+      getSettings: async () => settings,
+      policy: customPolicy,
+      tokenStore: new MemoryTokenStorage(),
+      openExternal: async (url) => {
+        const authUrl = new URL(url);
+        const redirect = new URL(authUrl.searchParams.get('redirect_uri')!);
+        void fetch(`${redirect}?code=c&state=${authUrl.searchParams.get('state')}`);
+      },
+      fetch: provider.fetchFn,
+    });
+    return service.login();
+  }
+
+  it('reads roles from the configured claim path and reports the configured admin roles', async () => {
+    const token = jwt({ resource_access: { accessdesk: { roles: ['it-admin'] } } });
+    const status = await signedInStatus(token, {
+      adminRoles: ['it-admin'],
+      rolesClaimPath: 'resource_access.accessdesk.roles',
+    });
+    expect(status).toMatchObject({ roles: ['it-admin'], adminRoles: ['it-admin'] });
+  });
+
+  it('ignores roles at the default path when another path is configured', async () => {
+    const token = jwt({ realm_access: { roles: ['hr-admin'] } });
+    const status = await signedInStatus(token, {
+      adminRoles: ['hr-admin'],
+      rolesClaimPath: 'resource_access.accessdesk.roles',
+    });
+    expect(status.roles).toEqual([]);
+  });
+
+  it('treats a malformed roles claim as no roles', async () => {
+    const token = jwt({ realm_access: { roles: 'hr-admin' } });
+    expect((await signedInStatus(token, policy)).roles).toEqual([]);
+  });
+
+  it('reports the admin roles even when signed out', async () => {
+    const service = makeService(fakeProvider().fetchFn, async () => {});
+    expect(await service.status()).toMatchObject({
+      authenticated: false,
+      adminRoles: policy.adminRoles,
+    });
   });
 });

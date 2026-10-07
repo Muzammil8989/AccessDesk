@@ -74,8 +74,7 @@ describe('TokenStore', () => {
 
 describe('SettingsStore', () => {
   const valid = {
-    keycloakUrl: 'http://localhost:8080',
-    realm: 'company-platform',
+    issuerUrl: 'http://localhost:8080/realms/company-platform',
     clientId: 'accessdesk',
     apiUrl: 'http://localhost:4000',
   };
@@ -92,7 +91,10 @@ describe('SettingsStore', () => {
 
   it('treats an invalid file as not configured', async () => {
     const file = path.join(dir, 'settings.json');
-    await writeFile(file, JSON.stringify({ ...valid, realm: '../master' }));
+    await writeFile(
+      file,
+      JSON.stringify({ ...valid, issuerUrl: 'http://localhost:8080/realms/x?next=//evil.test' }),
+    );
     expect(await new SettingsStore(file).load()).toBeNull();
   });
 });

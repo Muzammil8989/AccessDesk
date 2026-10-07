@@ -1,5 +1,3 @@
-// End-to-end smoke test: a mock Keycloak, the REAL built API and the REAL built Electron app.
-// Run with: pnpm test:e2e (builds first). Opens the app window briefly. Screenshots go to test-results/.
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -26,23 +24,21 @@ for (const built of ['apps/api/dist/server.js', 'apps/desktop/out/main/index.js'
   }
 }
 
-const KC_PORT = 18080;
+const IDP_PORT = 18080;
 const API_PORT = 14000;
-const KC = `http://127.0.0.1:${KC_PORT}`;
-const ISSUER = `${KC}/realms/company-platform`;
+const IDP = `http://127.0.0.1:${IDP_PORT}`;
+const ISSUER = `${IDP}/realms/company-platform`;
 const results = [];
 const check = (name, ok, extra = '') => {
   results.push({ name, ok });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  -> ' + extra : ''}`);
 };
 
-// ---------- mock Keycloak ----------
 const { privateKey, publicKey } = await jose.generateKeyPair('RS256');
 const jwk = { ...(await jose.exportJWK(publicKey)), kid: 'k1', alg: 'RS256', use: 'sig' };
 const codes = new Map();
 const refreshTokens = new Set();
 const issuedAccessTokens = [];
-// Realm roles the mock Keycloak puts into new access tokens. A scenario below changes it.
 let issuedRoles = ['hr-admin', 'offline_access'];
 const stats = { adminCalls: 0, adminBadAuth: 0, logoutBodies: [], tokenForms: [] };
 
@@ -90,20 +86,20 @@ const sendJson = (res, status, body) => {
   res.end(JSON.stringify(body));
 };
 
-const kc = createServer(async (req, res) => {
-  const url = new URL(req.url, KC);
+const idp = createServer(async (req, res) => {
+  const url = new URL(req.url, IDP);
   const p = url.pathname;
   if (p === '/realms/company-platform/.well-known/openid-configuration') {
     return sendJson(res, 200, {
       issuer: ISSUER,
-      authorization_endpoint: `${ISSUER}/protocol/openid-connect/auth`,
-      token_endpoint: `${ISSUER}/protocol/openid-connect/token`,
-      end_session_endpoint: `${ISSUER}/protocol/openid-connect/logout`,
+      authorization_endpoint: `${ISSUER}/authorize`,
+      token_endpoint: `${ISSUER}/token`,
+      end_session_endpoint: `${ISSUER}/logout`,
+      jwks_uri: `${ISSUER}/keys`,
     });
   }
-  if (p === '/realms/company-platform/protocol/openid-connect/certs')
-    return sendJson(res, 200, { keys: [jwk] });
-  if (p === '/realms/company-platform/protocol/openid-connect/auth') {
+  if (p === '/realms/company-platform/keys') return sendJson(res, 200, { keys: [jwk] });
+  if (p === '/realms/company-platform/authorize') {
     const q = url.searchParams;
     if (q.get('code_challenge_method') !== 'S256' || q.get('response_type') !== 'code')
       return sendJson(res, 400, { error: 'bad' });
@@ -114,7 +110,7 @@ const kc = createServer(async (req, res) => {
     });
     return res.end();
   }
-  if (p === '/realms/company-platform/protocol/openid-connect/token') {
+  if (p === '/realms/company-platform/token') {
     const form = new URLSearchParams(await readBody(req));
     stats.tokenForms.push(Object.fromEntries(form));
     if (form.has('client_secret')) return sendJson(res, 400, { error: 'unexpected_secret' });
@@ -139,7 +135,7 @@ const kc = createServer(async (req, res) => {
     }
     return sendJson(res, 400, { error: 'invalid_grant' });
   }
-  if (p === '/realms/company-platform/protocol/openid-connect/logout') {
+  if (p === '/realms/company-platform/logout') {
     stats.logoutBodies.push(Object.fromEntries(new URLSearchParams(await readBody(req))));
     res.writeHead(204);
     return res.end();
@@ -164,18 +160,21 @@ const kc = createServer(async (req, res) => {
   }
   sendJson(res, 404, { error: 'not found' });
 });
-await new Promise((r) => kc.listen(KC_PORT, '127.0.0.1', r));
+await new Promise((r) => idp.listen(IDP_PORT, '127.0.0.1', r));
 
-// ---------- real API build ----------
+const ACCESS_POLICY = {
+  AUTH_ADMIN_ROLES: 'hr-admin,super-admin',
+  AUTH_ROLES_CLAIM_PATH: 'realm_access.roles',
+};
 const apiLogs = [];
 const api = spawn('node', ['dist/server.js'], {
   cwd: `${ROOT}/apps/api`,
   env: {
     ...process.env,
     NODE_ENV: 'production',
-    KEYCLOAK_URL: KC,
-    KEYCLOAK_REALM: 'company-platform',
-    KEYCLOAK_CLIENT_ID: 'accessdesk',
+    IDENTITY_ISSUER_URL: ISSUER,
+    IDENTITY_CLIENT_ID: 'accessdesk',
+    ...ACCESS_POLICY,
     DATABASE_URL: 'postgresql://accessdesk:change-me@localhost:5432/accessdesk',
     API_PORT: String(API_PORT),
   },
@@ -185,16 +184,12 @@ api.stderr.on('data', (d) => apiLogs.push(String(d)));
 for (let i = 0; i < 50; i++) {
   try {
     if ((await fetch(`http://127.0.0.1:${API_PORT}/health`)).ok) break;
-  } catch {
-    /* API not up yet */
-  }
+  } catch {}
   await new Promise((r) => setTimeout(r, 100));
 }
 
-// ---------- Electron ----------
 const userData = mkdtempSync(path.join(os.tmpdir(), 'accessdesk-e2e-'));
-// ELECTRON_RUN_AS_NODE leaks in from the editor's own Electron process and would make Electron behave as plain Node.
-const electronEnv = { ...process.env };
+const electronEnv = { ...process.env, ...ACCESS_POLICY };
 delete electronEnv.ELECTRON_RUN_AS_NODE;
 delete electronEnv.ELECTRON_RENDERER_URL;
 const launch = () =>
@@ -216,7 +211,6 @@ try {
   check('first run lands on the setup wizard', true, win.url());
   check('renderer is served from app:// scheme', win.url().startsWith('app://accessdesk/'));
 
-  // --- hardening
   const env = await win.evaluate(() => ({
     require: typeof require,
     process: typeof process,
@@ -274,34 +268,31 @@ try {
 
   await win.screenshot({ path: path.join(SHOTS, '1-setup.png') });
 
-  // --- setup wizard validation + save
-  await win.getByLabel('Keycloak URL').fill('not-a-url');
+  await win.getByLabel('Issuer URL').fill('not-a-url');
   await win.getByRole('button', { name: 'Save and continue' }).click();
   await win
     .getByText(/invalid|url/i)
     .first()
     .waitFor({ timeout: 5000 });
   check('wizard validates input with Zod', true);
-  await win.getByLabel('Keycloak URL').fill(KC);
-  await win.getByLabel('Realm').fill('company-platform');
+  await win.getByLabel('Issuer URL').fill(ISSUER);
   await win.getByLabel('Client ID').fill('accessdesk');
   await win.getByLabel('AccessDesk API URL').fill(`http://127.0.0.1:${API_PORT}`);
   await win.getByRole('button', { name: 'Test connection' }).click();
-  await win.getByText('Connected to realm "company-platform"').waitFor({ timeout: 10000 });
-  check('test connection reaches Keycloak discovery', true);
+  await win.getByText('Connected to the identity provider').waitFor({ timeout: 10000 });
+  check('test connection reaches OIDC discovery', true);
   await win.getByRole('button', { name: 'Save and continue' }).click();
-  await win.getByRole('button', { name: 'Sign in with Keycloak' }).waitFor({ timeout: 10000 });
+  await win.getByRole('button', { name: 'Sign in' }).waitFor({ timeout: 10000 });
   check('saving settings continues to the login page', true);
   await win.screenshot({ path: path.join(SHOTS, '2-login.png') });
 
-  // --- login: stub the system browser by following the auth URL ourselves
   await app.evaluate(({ shell }) => {
     shell.openExternal = async (url) => {
       globalThis.__opened = url;
       void fetch(url);
     };
   });
-  await win.getByRole('button', { name: 'Sign in with Keycloak' }).click();
+  await win.getByRole('button', { name: 'Sign in' }).click();
   await win.getByRole('heading', { name: 'Employees' }).waitFor({ timeout: 15000 });
   const opened = new URL(await app.evaluate(() => globalThis.__opened));
   check(
@@ -316,11 +307,13 @@ try {
   );
   check('signed-in user shown in the sidebar', await win.getByText('Hana HR').isVisible());
 
-  // --- employees through the real API
   await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 15000 });
-  check('employees list loaded via API -> Keycloak admin (JWT verified via JWKS)', true);
   check(
-    'API forwarded a token Keycloak accepted on every admin call',
+    'employees list loaded via API -> identity provider admin API (JWT verified via discovered keys)',
+    true,
+  );
+  check(
+    'API forwarded a token the identity provider accepted on every admin call',
     stats.adminCalls >= 2 && stats.adminBadAuth === 0,
     `calls=${stats.adminCalls}`,
   );
@@ -336,17 +329,15 @@ try {
   await win.getByText(/No employees match/).waitFor({ timeout: 10000 });
   check('empty state works', true);
 
-  // --- sidebar nav
   for (const name of ['Onboard', 'Offboard', 'Access Review', 'Audit Log']) {
     await win.getByRole('link', { name }).click();
     await win.getByRole('heading', { name }).waitFor({ timeout: 5000 });
   }
   check('placeholder screens reachable from sidebar', true);
   await win.getByRole('link', { name: 'Settings' }).click();
-  await win.getByRole('heading', { name: 'Keycloak connection' }).waitFor();
+  await win.getByRole('heading', { name: 'Identity provider connection' }).waitFor();
   await win.screenshot({ path: path.join(SHOTS, '4-settings.png') });
 
-  // --- storage
   const sessionFile = path.join(userData, 'session.bin');
   const settingsFile = path.join(userData, 'settings.json');
   const sessionBytes = existsSync(sessionFile) ? readFileSync(sessionFile).toString('latin1') : '';
@@ -365,7 +356,6 @@ try {
     settingsText.replace(/\s+/g, ' '),
   );
 
-  // --- restart: session restored from encrypted storage
   await app.close();
   app = await launch();
   win = await app.firstWindow();
@@ -374,28 +364,25 @@ try {
   await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 15000 });
   check('session survives an app restart without signing in again', true);
 
-  // --- sign out
   await win.getByRole('button', { name: 'Sign out' }).click();
-  await win.getByRole('button', { name: 'Sign in with Keycloak' }).waitFor({ timeout: 10000 });
+  await win.getByRole('button', { name: 'Sign in' }).waitFor({ timeout: 10000 });
   check('sign out returns to the login page', true);
   check(
-    'Keycloak SSO session ended on sign out',
+    'identity provider session ended on sign out',
     stats.logoutBodies.length === 1 &&
       stats.logoutBodies[0].client_id === 'accessdesk' &&
       !!stats.logoutBodies[0].refresh_token,
   );
   check('session file removed on sign out', !existsSync(sessionFile));
 
-  // --- a user without an admin role sees nothing they cannot use
   issuedRoles = ['offline_access', 'default-roles-company-platform'];
   const callsBefore = stats.adminCalls;
-  // The app was restarted above, so the browser stub is gone. Install it again.
   await app.evaluate(({ shell }) => {
     shell.openExternal = async (url) => {
       void fetch(url);
     };
   });
-  await win.getByRole('button', { name: 'Sign in with Keycloak' }).click();
+  await win.getByRole('button', { name: 'Sign in' }).click();
   const noAccess = win.getByRole('heading', { name: "You don't have access to AccessDesk" });
   await noAccess.waitFor({ timeout: 15000 });
   check('user without an admin role gets the no-access page', true);
@@ -412,10 +399,9 @@ try {
   check('typing the URL of a hidden screen does not open it', await noAccess.isVisible());
   check('no employee data was requested for them', stats.adminCalls === callsBefore);
   await win.getByRole('button', { name: 'Sign out' }).click();
-  await win.getByRole('button', { name: 'Sign in with Keycloak' }).waitFor({ timeout: 10000 });
+  await win.getByRole('button', { name: 'Sign in' }).waitFor({ timeout: 10000 });
   check('they can sign out from the no-access page', true);
 
-  // Last on purpose: a blocked navigation leaves Playwright waiting for it to finish.
   void win
     .evaluate(() => {
       location.href = 'https://example.com/';
@@ -435,19 +421,16 @@ try {
       const w = (await app.windows())[0];
       await w?.screenshot({ path: path.join(SHOTS, 'failure.png') });
     }
-  } catch {
-    /* best effort */
-  }
+  } catch {}
 } finally {
   await app?.close().catch(() => {});
   api.kill();
-  kc.close();
+  idp.close();
 }
 
 const apiText = apiLogs.join('');
 const leaked = issuedAccessTokens.some((t) => apiText.includes(t.slice(20, 80)));
 check('API logs never contain a token', !leaked);
-// The test itself injects one inline script on purpose to prove the CSP blocks it. Ignore that one line.
 const ownProbe = /Executing inline script violates/;
 const unexpectedLogs = consoleLogs.filter((l) => !ownProbe.test(l));
 const csp = unexpectedLogs.filter((l) => /content security policy|refused to/i.test(l));

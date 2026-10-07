@@ -1,4 +1,4 @@
-import { KeycloakError } from '@accessdesk/keycloak-client';
+import { IdentityProviderError, type IdentityUser } from '@accessdesk/identity';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   USER_ID,
@@ -22,8 +22,19 @@ const kcUser = {
   emailVerified: true,
 };
 
+const identityUser: IdentityUser = {
+  subjectId: USER_ID,
+  username: 'ann',
+  email: 'ann@example.com',
+  firstName: null,
+  lastName: null,
+  enabled: true,
+  emailVerified: true,
+  createdAt: null,
+};
+
 describe('GET /employees', () => {
-  it("sends the admin's own token to Keycloak (no service account)", async () => {
+  it("sends the admin's own token to the identity provider (no service account)", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json([kcUser]))
@@ -45,7 +56,7 @@ describe('GET /employees', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [url, init] of fetchMock.mock.calls) {
-      expect(String(url)).toContain('http://kc.test/admin/realms/company-platform/users');
+      expect(String(url)).toMatch(/^http:\/\/idp\.test\//);
       expect((init?.headers as Record<string, string>).Authorization).toBe(`Bearer ${token}`);
     }
   });
@@ -58,13 +69,13 @@ describe('GET /employees', () => {
     expect(res.json().error).toBe('bad_request');
   });
 
-  it('reports an unreachable Keycloak as a server error, not a crash', async () => {
-    const keycloak = {
+  it('reports an unreachable identity provider as a server error, not a crash', async () => {
+    const identity = {
       listUsers: vi.fn().mockRejectedValue(new TypeError('connect ECONNREFUSED')),
       countUsers: vi.fn().mockResolvedValue(0),
     };
     const token = await harness.makeToken();
-    const app = await buildTestApp(harness, { keycloak });
+    const app = await buildTestApp(harness, { identity });
 
     const res = await app.inject({ url: '/employees', headers: bearer(token) });
     expect(res.statusCode).toBe(500);
@@ -82,14 +93,14 @@ describe('GET /employees/:id', () => {
   });
 
   it('returns the employee', async () => {
-    const keycloak = { getUser: vi.fn().mockResolvedValue(kcUser) };
+    const identity = { getUser: vi.fn().mockResolvedValue(identityUser) };
     const token = await harness.makeToken();
-    const app = await buildTestApp(harness, { keycloak });
+    const app = await buildTestApp(harness, { identity });
 
     const res = await app.inject({ url: `/employees/${USER_ID}`, headers: bearer(token) });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ id: USER_ID, username: 'ann' });
-    expect(keycloak.getUser).toHaveBeenCalledWith(USER_ID);
+    expect(identity.getUser).toHaveBeenCalledWith(USER_ID);
   });
 
   it.each([
@@ -98,15 +109,15 @@ describe('GET /employees/:id', () => {
     [401, 401],
     [500, 502],
     [503, 502],
-  ])('maps a Keycloak %i answer to %i', async (keycloakStatus, expected) => {
-    const keycloak = {
-      getUser: vi.fn().mockRejectedValue(new KeycloakError(keycloakStatus, 'nope')),
+  ])('maps an identity provider %i answer to %i', async (providerStatus, expected) => {
+    const identity = {
+      getUser: vi.fn().mockRejectedValue(new IdentityProviderError(providerStatus, 'nope')),
     };
     const token = await harness.makeToken();
-    const app = await buildTestApp(harness, { keycloak });
+    const app = await buildTestApp(harness, { identity });
 
     const res = await app.inject({ url: `/employees/${USER_ID}`, headers: bearer(token) });
     expect(res.statusCode).toBe(expected);
-    expect(res.json().error).toBe('keycloak_error');
+    expect(res.json().error).toBe('identity_error');
   });
 });

@@ -1,4 +1,3 @@
-// Small helpers shared by the repo scripts. Plain Node, no dependencies, works on Windows, macOS and Linux.
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -16,11 +15,7 @@ export function fail(message) {
   process.exit(1);
 }
 
-/** Runs a command in the repo root with live output. Exits the script if it fails. */
 export function run(command, args, { hint } = {}) {
-  // One command string (not an args array) with a shell: Windows needs the shell to resolve
-  // pnpm.cmd, and Node deprecates passing an args array together with `shell`.
-  // Arguments are fixed strings from these scripts, never user input.
   const result = spawnSync(`${command} ${args.join(' ')}`, {
     cwd: ROOT,
     stdio: 'inherit',
@@ -33,7 +28,6 @@ export function run(command, args, { hint } = {}) {
 
 export function checkNode() {
   const current = process.versions.node.split('.').map(Number);
-  // Compare major, minor, patch in order; the first difference decides.
   const firstDifference = MIN_NODE.findIndex((part, i) => (current[i] ?? 0) !== part);
   const tooOld =
     firstDifference !== -1 && (current[firstDifference] ?? 0) < MIN_NODE[firstDifference];
@@ -45,7 +39,7 @@ export function ensureEnvFile() {
   const envPath = path.join(ROOT, '.env');
   if (existsSync(envPath)) return console.log('.env already exists, leaving it alone');
   copyFileSync(path.join(ROOT, '.env.example'), envPath);
-  console.log('Created .env from .env.example. Edit it if your Keycloak settings differ.');
+  console.log('Created .env from .env.example. Edit it if your identity provider settings differ.');
 }
 
 export function startDatabase() {

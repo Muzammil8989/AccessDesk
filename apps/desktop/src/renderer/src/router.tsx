@@ -14,8 +14,6 @@ const guarded = (feature: Feature, page: ReactNode) => (
   <RequireFeature feature={feature}>{page}</RequireFeature>
 );
 
-// Hash routing works the same under the dev server and the app:// scheme, with no server fallback needed.
-// The route table is exported separately so tests can mount the real routes in a memory router.
 export const routes: RouteObject[] = [
   { path: '/setup', element: <SetupPage /> },
   { path: '/login', element: <LoginPage /> },

@@ -1,4 +1,3 @@
-// Removes build output and caches: pnpm clean (add --deps to remove node_modules too)
 import { readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { ROOT } from './lib.mjs';

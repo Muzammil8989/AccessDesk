@@ -27,6 +27,21 @@ describe('who sees what', () => {
     ]);
   });
 
+  it('follows the configured admin roles: a custom role gets the app, a default one does not', async () => {
+    const custom = { ...adminAuth, roles: ['it-admin'], adminRoles: ['it-admin'] };
+    installFakeApi({ auth: custom });
+    renderRoutes(routes, '/onboard');
+    await screen.findByRole('heading', { name: 'Onboard' });
+  });
+
+  it('refuses a user whose role is only an admin role under the default configuration', async () => {
+    const stale = { ...adminAuth, roles: ['hr-admin'], adminRoles: ['it-admin'] };
+    installFakeApi({ auth: stale });
+    const { router } = renderRoutes(routes, '/onboard');
+    await screen.findByRole('heading', { name: "You don't have access to AccessDesk" });
+    expect(router.state.location.pathname).toBe('/no-access');
+  });
+
   it.each(['/employees', '/settings', '/onboard', '/'])(
     'sends a user without an admin role from %s to the no-access page, with no menu',
     async (path) => {
@@ -45,11 +60,11 @@ describe('who sees what', () => {
     installFakeApi({ auth: signedOut });
     const { router } = renderRoutes(routes, '/employees');
 
-    await screen.findByRole('button', { name: 'Sign in with Keycloak' });
+    await screen.findByRole('button', { name: 'Sign in' });
     expect(router.state.location.pathname).toBe('/login');
   });
 
-  it('sends everyone to the setup wizard until Keycloak is configured', async () => {
+  it('sends everyone to the setup wizard until the identity provider is configured', async () => {
     installFakeApi({ settings: null, auth: signedOut });
     const { router } = renderRoutes(routes, '/employees');
 

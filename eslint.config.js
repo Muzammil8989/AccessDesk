@@ -22,8 +22,6 @@ export default tseslint.config(
   },
   js.configs.recommended,
 
-  // TypeScript, with type information. It catches forgotten awaits, promises passed where a
-  // plain value is expected, unsafe `any` flows and similar bugs that syntax-only linting misses.
   ...tseslint.configs.recommendedTypeChecked.map((config) => ({ ...config, files: TS_FILES })),
   {
     files: TS_FILES,
@@ -34,11 +32,9 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
-      // Fakes and interface-shaped functions are often `async` without needing `await`.
       '@typescript-eslint/require-await': 'off',
     },
   },
-  // Plain JavaScript files (scripts, config, e2e) have no type information.
   { files: PLAIN_JS_FILES, ...tseslint.configs.disableTypeChecked },
 
   {
@@ -46,18 +42,17 @@ export default tseslint.config(
     rules: {
       eqeqeq: ['error', 'always'],
       'no-var': 'error',
+      'no-empty': ['error', { allowEmptyCatch: true }],
       'prefer-const': 'error',
     },
   },
 
-  // Production code logs through the logger. console is fine in scripts, seeds and tests.
   {
     files: ['apps/*/src/**/*.{ts,tsx}', 'packages/*/src/**/*.ts'],
     rules: { 'no-console': ['error', { allow: ['warn', 'error'] }] },
   },
 
   {
-    // Renderer code runs in a browser context. Accessibility rules apply to its JSX.
     files: ['apps/desktop/src/renderer/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.browser } },
     plugins: { 'react-hooks': reactHooks },
@@ -72,12 +67,10 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser } },
   },
   {
-    // E2E scripts run in Node, but the functions passed to page.evaluate() run in the browser.
     files: ['apps/desktop/test/e2e/**/*.mjs'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 
-  // Architecture boundaries: keep the layers apart so each can change on its own.
   {
     files: ['apps/desktop/src/renderer/**/*.{ts,tsx}'],
     rules: {
@@ -125,6 +118,25 @@ export default tseslint.config(
     },
   },
   {
+    files: ['apps/api/src/**/*.ts'],
+    ignores: ['apps/api/src/server.ts', 'apps/api/src/infra/identity.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['**/desktop/**'], message: 'The API must not depend on the desktop app.' },
+            {
+              group: ['@accessdesk/identity-*'],
+              message:
+                'Depend on IdentityProvider from @accessdesk/identity. Only server.ts (through infra/identity.ts) picks an adapter.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['packages/**/*.ts'],
     rules: {
       'no-restricted-imports': [
@@ -139,19 +151,20 @@ export default tseslint.config(
   },
 
   {
-    // Keep every Keycloak Admin call inside packages/keycloak-client
-    files: ['apps/**/*.{ts,tsx}'],
-    ignores: ['**/*.test.ts', '**/*.test.tsx'],
+    files: ['apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
+    ignores: ['packages/identity-*/**', '**/*.test.ts', '**/*.test.tsx'],
     rules: {
       'no-restricted-syntax': [
         'error',
         {
           selector: 'Literal[value=/\\/admin\\/realms/]',
-          message: 'Keycloak Admin API calls belong in packages/keycloak-client only.',
+          message:
+            'Identity provider admin API calls belong in an adapter package (packages/identity-*) only.',
         },
         {
           selector: 'TemplateElement[value.raw=/\\/admin\\/realms/]',
-          message: 'Keycloak Admin API calls belong in packages/keycloak-client only.',
+          message:
+            'Identity provider admin API calls belong in an adapter package (packages/identity-*) only.',
         },
       ],
     },
@@ -166,7 +179,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/unbound-method': 'off',
-      // Fake fetch implementations receive URL | string | Request and just stringify it.
       '@typescript-eslint/no-base-to-string': 'off',
       '@typescript-eslint/restrict-template-expressions': 'off',
     },

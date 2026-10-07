@@ -14,7 +14,6 @@ export function createMainWindow(options: {
     title: 'AccessDesk',
     webPreferences: {
       preload: options.preloadPath,
-      // The renderer is treated as untrusted: no Node, isolated JS worlds, OS sandbox.
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

@@ -17,6 +17,19 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # The migration tests need a real PostgreSQL. They create their own scratch database.
+    services:
+      postgres:
+        image: postgres:16.15
+        env:
+          POSTGRES_PASSWORD: change-me
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
 
@@ -34,6 +47,10 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # The provider name may only appear where scripts/naming-allowlist.json allows (ADR 0009).
+      - name: Naming check
+        run: pnpm check:naming
+
       - name: Format check
         run: pnpm format:check
 
@@ -43,6 +60,8 @@ jobs:
       # Runs every test and fails if coverage drops below the thresholds in each vitest.config.ts.
       - name: Test with coverage
         run: pnpm test:coverage
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:change-me@localhost:5432/postgres
 
       - name: Build
         run: pnpm build

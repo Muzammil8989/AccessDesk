@@ -12,7 +12,16 @@ describe('no-access page', () => {
     await screen.findByText(/Member One/);
     expect(screen.getByText('offline_access')).toBeInTheDocument();
     expect(screen.getByText('default-roles-company-platform')).toBeInTheDocument();
-    expect(screen.getByText('hr-admin')).toBeInTheDocument(); // named as what they need
+    expect(screen.getByText('hr-admin')).toBeInTheDocument();
+    expect(screen.getByText('super-admin')).toBeInTheDocument();
+  });
+
+  it('names the configured admin roles, not a built-in list', async () => {
+    installFakeApi({ auth: { ...memberAuth, adminRoles: ['it-admin'] } });
+    renderRoutes(routes, '/no-access');
+
+    expect(await screen.findByText('it-admin')).toBeInTheDocument();
+    expect(screen.queryByText('hr-admin')).not.toBeInTheDocument();
   });
 
   it('says so when the token carries no roles at all', async () => {

@@ -1,4 +1,4 @@
-import { ADMIN_ROLES, hasAdminAccess } from '@accessdesk/shared';
+import { hasAdminAccess } from '@accessdesk/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LogOut, ShieldAlert } from 'lucide-react';
 import { Link, Navigate } from 'react-router';
@@ -19,7 +19,8 @@ export function NoAccessPage() {
   if (settings.isPending || auth.isPending) return null;
   if (!settings.data) return <Navigate to="/setup" replace />;
   if (!auth.data?.authenticated) return <Navigate to="/login" replace />;
-  if (hasAdminAccess(auth.data.roles)) return <Navigate to="/employees" replace />;
+  if (hasAdminAccess(auth.data.roles, auth.data.adminRoles))
+    return <Navigate to="/employees" replace />;
 
   const user = auth.data;
   const roles = [...user.roles].sort();
@@ -34,8 +35,15 @@ export function NoAccessPage() {
           <CardTitle className="text-xl">You don't have access to AccessDesk</CardTitle>
           <CardDescription>
             You are signed in as <strong>{user.displayName ?? user.username}</strong>, but this
-            account has no AccessDesk role. Ask a Keycloak administrator to give you the{' '}
-            <strong>{ADMIN_ROLES[1]}</strong> or <strong>{ADMIN_ROLES[0]}</strong> realm role.
+            account has no AccessDesk role. Ask an administrator of your identity provider to give
+            you the role{user.adminRoles.length === 1 ? '' : 's'}{' '}
+            {user.adminRoles.map((role, index) => (
+              <span key={role}>
+                {index > 0 && ' or '}
+                <strong>{role}</strong>
+              </span>
+            ))}
+            .
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-5 text-sm">
@@ -54,12 +62,9 @@ export function NoAccessPage() {
               Role assigned but still no access?
             </summary>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-              <li>The role must be a realm role (not a client role) with exactly that name.</li>
+              <li>The role must have exactly that name.</li>
               <li>It can be assigned to the user, or to a group or composite role they have.</li>
-              <li>
-                The client's scopes must let realm roles into the access token (full scope allowed,
-                or the role in the client's scope mappings).
-              </li>
+              <li>The client's scopes must let roles into the access token.</li>
               <li>After any change, sign out and sign in again so the token is reissued.</li>
             </ul>
           </details>

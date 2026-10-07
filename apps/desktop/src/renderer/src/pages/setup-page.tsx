@@ -4,7 +4,6 @@ import { SettingsForm } from '@/components/settings-form';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { settingsQuery } from '@/lib/session';
 
-/** First-run wizard: connect AccessDesk to Keycloak before anyone can sign in. */
 export function SetupPage() {
   const navigate = useNavigate();
   const settings = useQuery(settingsQuery);
@@ -15,7 +14,7 @@ export function SetupPage() {
         <CardHeader>
           <CardTitle className="text-xl">Welcome to AccessDesk</CardTitle>
           <CardDescription>
-            Connect to your Keycloak server to get started. These are public settings only: no
+            Connect to your identity provider to get started. These are public settings only: no
             password or secret is stored in this app.
           </CardDescription>
         </CardHeader>

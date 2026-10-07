@@ -68,7 +68,6 @@ describe('Employees screen', () => {
         max: 20,
       }),
     );
-    // Debounced: one request for "ann", not one per keystroke.
     const searchCalls = api.api.get.mock.calls.filter(([, q]) => q?.search !== undefined);
     expect(searchCalls).toHaveLength(1);
   });
@@ -83,13 +82,17 @@ describe('Employees screen', () => {
 
   it('shows the server message and a link to Settings on a 403', async () => {
     installFakeApi({
-      apiGet: async () => ({ ok: false, status: 403, message: 'Keycloak refused this request' }),
+      apiGet: async () => ({
+        ok: false,
+        status: 403,
+        message: 'The identity provider refused this request',
+      }),
     });
     renderRoutes(routes, '/employees');
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Could not load employees');
-    expect(alert).toHaveTextContent('Keycloak refused this request');
+    expect(alert).toHaveTextContent('The identity provider refused this request');
     expect(within(alert).getByRole('link', { name: 'Settings' })).toHaveAttribute(
       'href',
       '/settings',
@@ -126,7 +129,6 @@ describe('Employees screen', () => {
   });
 
   it('returns to the login page when the session has ended (401)', async () => {
-    // The main process reports the session as gone at the moment the API answers 401.
     const api = installFakeApi({
       auth: adminAuth,
       apiGet: async () => {
@@ -141,7 +143,7 @@ describe('Employees screen', () => {
 
   it('retries a server fault by itself, but not a client error', async () => {
     const serverFault = installFakeApi({
-      apiGet: async () => ({ ok: false, status: 503, message: 'Keycloak is down' }),
+      apiGet: async () => ({ ok: false, status: 503, message: 'The identity provider is down' }),
     });
     const first = renderRoutes(routes, '/employees');
     await waitFor(() => expect(serverFault.api.get.mock.calls.length).toBeGreaterThan(1), {

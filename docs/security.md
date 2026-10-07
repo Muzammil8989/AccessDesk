@@ -17,10 +17,13 @@ These are enforced in code and covered by tests where possible. Report vulnerabi
 4. **Tokens are stored with Electron `safeStorage`** (Windows DPAPI, macOS Keychain, Linux libsecret),
    never in plain files or `localStorage`. If secure storage is unavailable, tokens stay in memory
    only. The renderer never sees a token: the main process attaches it to API calls.
-5. **The API verifies the access token on every request** (signature via JWKS, issuer, audience, expiry,
-   pinned algorithms) and requires the realm role `super-admin` or `hr-admin`. Only `/health` is public.
-6. **The API calls Keycloak with the admin's own access token**, forwarded as is. There is no service
-   account, so Keycloak's admin events show the real person.
+5. **The API verifies the access token on every request** (signature, issuer, audience, expiry, pinned
+   algorithms RS256/PS256/ES256) and requires one of the configured admin roles (`AUTH_ADMIN_ROLES`,
+   default `super-admin` and `hr-admin`, read from the token at `AUTH_ROLES_CLAIM_PATH`). The signing
+   keys are found through standard OIDC discovery: the issuer URL plus
+   `/.well-known/openid-configuration`, then its `jwks_uri`. Only `/health` is public.
+6. **The API calls the identity provider with the admin's own access token**, forwarded as is. There is
+   no service account, so the provider's admin events show the real person.
 7. **All input is validated with Zod** on both sides: API query and params, IPC payloads, settings, and
    API responses in the renderer. Tokens and passwords are never logged (`authorization` headers are
    redacted, and error messages never include tokens).
@@ -40,7 +43,9 @@ These are enforced in code and covered by tests where possible. Report vulnerabi
 ## Role-based visibility
 
 The desktop app shows each user only what their role allows. `packages/shared/src/permissions.ts` says
-which realm roles may use which feature (`canAccess`, `hasAdminAccess`). The sidebar hides entries the
+which roles may use which feature (`canAccess`, `hasAdminAccess`). The desktop main process reads
+`AUTH_ADMIN_ROLES` and `AUTH_ROLES_CLAIM_PATH` from the same `.env` as the API, with the same validation
+code, so the UI and the API cannot disagree about who is an admin. The sidebar hides entries the
 user cannot use, each screen is guarded against direct navigation, and a signed-in user with no AccessDesk
 role sees only a "no access" page with no menu and no data requests.
 
