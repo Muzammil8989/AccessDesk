@@ -17,6 +17,6 @@ labels: bug
 
 - OS:
 - Node / pnpm versions:
-- Keycloak version:
+- Identity provider (name and version):
 
 **Logs or screenshots** (remove tokens, passwords and personal data first)

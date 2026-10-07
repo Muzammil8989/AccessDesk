@@ -1,8 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC, type AccessDeskApi } from '../shared/ipc';
 
-// The whole surface the UI can reach. No generic "invoke any channel" escape hatch,
-// and no token ever crosses this bridge.
 const api: AccessDeskApi = {
   settings: {
     get: () => ipcRenderer.invoke(IPC.settingsGet),

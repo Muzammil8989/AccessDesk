@@ -7,9 +7,13 @@ api:
   - changed-files:
       - any-glob-to-any-file: apps/api/**
 
-keycloak-client:
+identity:
   - changed-files:
-      - any-glob-to-any-file: packages/keycloak-client/**
+      - any-glob-to-any-file: packages/identity/**
+
+identity-keycloak:
+  - changed-files:
+      - any-glob-to-any-file: packages/identity-keycloak/**
 
 shared:
   - changed-files:

@@ -10,7 +10,6 @@ interface FormFieldProps extends ComponentProps<typeof Input> {
   error?: FieldError;
 }
 
-/** Label, input, hint and validation message wired together for screen readers. */
 export function FormField({ id, label, hint, error, ...inputProps }: FormFieldProps) {
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;

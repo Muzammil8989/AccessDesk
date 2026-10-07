@@ -17,4 +17,5 @@
 /docs/security.md       @Muzammil8989
 /apps/desktop/src/main/ @Muzammil8989
 /apps/api/src/plugins/  @Muzammil8989
-/packages/keycloak-client/ @Muzammil8989
+/packages/identity/ @Muzammil8989
+/packages/identity-keycloak/ @Muzammil8989

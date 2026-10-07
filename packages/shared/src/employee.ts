@@ -1,7 +1,5 @@
 import { z } from 'zod';
 
-// Employee data lives in Keycloak. This is only the view the app shows;
-// AccessDesk never stores name or email in its own database.
 export const employeeSchema = z.object({
   id: z.string(),
   username: z.string(),
@@ -31,5 +29,4 @@ export const employeeListSchema = z.object({
 });
 export type EmployeeList = z.infer<typeof employeeListSchema>;
 
-// Keycloak user IDs are UUIDs. Validating early stops odd values from reaching a URL path.
 export const employeeIdParamsSchema = z.object({ id: z.uuid() });

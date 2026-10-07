@@ -43,7 +43,6 @@ describe('rate limiting', () => {
     for (let i = 0; i < 5; i++) {
       statuses.push((await app.inject({ url: '/templates' })).statusCode);
     }
-    // Three rejected for the missing token, then the limiter takes over.
     expect(statuses).toEqual([401, 401, 401, 429, 429]);
   });
 

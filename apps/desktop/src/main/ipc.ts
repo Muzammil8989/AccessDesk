@@ -31,8 +31,6 @@ function describeIssues(error: z.ZodError): string {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  // Handlers only answer our own top-level page. Anything else (a frame, another origin)
-  // that somehow reaches the preload API gets nothing.
   const handle = <A extends unknown[], R>(
     channel: string,
     fn: (...args: A) => Promise<R> | R,
@@ -56,7 +54,6 @@ export function registerIpc(deps: IpcDeps): void {
 
     const previous = await deps.settings.load();
     await deps.settings.save(parsed.data);
-    // Tokens belong to one realm and client. If those change, the old session is useless.
     if (identityChanged(previous, parsed.data)) await deps.auth.clearSession();
     return { ok: true, settings: parsed.data };
   });
@@ -66,11 +63,17 @@ export function registerIpc(deps: IpcDeps): void {
     if (!parsed.success) return { ok: false, message: describeIssues(parsed.error) };
     try {
       await discover(parsed.data);
-      return { ok: true, message: `Connected to realm "${parsed.data.realm}"` };
+      return {
+        ok: true,
+        message: `Connected to the identity provider at ${parsed.data.issuerUrl}`,
+      };
     } catch (error) {
       return {
         ok: false,
-        message: error instanceof OidcError ? error.message : 'Unexpected response from Keycloak',
+        message:
+          error instanceof OidcError
+            ? error.message
+            : 'Unexpected response from the identity provider',
       };
     }
   });
@@ -100,5 +103,5 @@ export function registerIpc(deps: IpcDeps): void {
 }
 
 function identityChanged(a: AppSettings | null, b: AppSettings): boolean {
-  return !a || a.keycloakUrl !== b.keycloakUrl || a.realm !== b.realm || a.clientId !== b.clientId;
+  return !a || a.issuerUrl !== b.issuerUrl || a.clientId !== b.clientId;
 }

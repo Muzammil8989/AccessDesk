@@ -8,7 +8,6 @@ export default defineConfig({
       exclude: ['src/index.ts'],
       reporter: ['text-summary', 'text', 'lcov'],
       reportsDirectory: './coverage',
-      // A floor, not a goal: coverage may go up freely but must not quietly fall below this.
       thresholds: { lines: 95, statements: 95, functions: 95, branches: 75 },
     },
     environment: 'node',

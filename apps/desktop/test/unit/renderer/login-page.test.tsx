@@ -13,7 +13,7 @@ describe('login page', () => {
       api.auth.status.mockResolvedValue(adminAuth);
       return { ok: true, status: adminAuth };
     });
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in with Keycloak' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/employees'));
   });
@@ -25,7 +25,7 @@ describe('login page', () => {
     });
     renderRoutes(routes, '/login');
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in with Keycloak' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Sign-in timed out');
   });
 
@@ -36,19 +36,19 @@ describe('login page', () => {
     });
     renderRoutes(routes, '/login');
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in with Keycloak' }));
-    await screen.findByRole('button', { name: 'Sign in with Keycloak' });
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('button', { name: 'Sign in' });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('can cancel while waiting for the browser', async () => {
     const api = installFakeApi({
       auth: signedOut,
-      login: () => new Promise(() => undefined), // never finishes: the user is in the browser
+      login: () => new Promise(() => undefined),
     });
     renderRoutes(routes, '/login');
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign in with Keycloak' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
     expect(await screen.findByRole('status')).toHaveTextContent('Waiting for you');
 
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));

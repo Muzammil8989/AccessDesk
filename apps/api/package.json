@@ -18,7 +18,8 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@accessdesk/keycloak-client": "workspace:*",
+    "@accessdesk/identity": "workspace:*",
+    "@accessdesk/identity-keycloak": "workspace:*",
     "@accessdesk/shared": "workspace:*",
     "@fastify/helmet": "13.1.1",
     "@fastify/rate-limit": "11.2.0",

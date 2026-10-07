@@ -1,5 +1,3 @@
-// Start everything in one command: pnpm dev:all
-// Brings up the database, applies pending migrations, then runs the API and the desktop app.
 import { checkNode, ensureEnvFile, migrateDatabase, run, startDatabase, step } from './lib.mjs';
 
 checkNode();

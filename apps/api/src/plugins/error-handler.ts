@@ -1,8 +1,7 @@
-import { KeycloakError } from '@accessdesk/keycloak-client';
+import { IdentityProviderError } from '@accessdesk/identity';
 import type { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 
-// Keycloak statuses the admin can act on. Anything else is reported as an upstream failure.
 const PASS_THROUGH_STATUSES = [401, 403, 404];
 
 const CLIENT_ERROR_CODES: Record<number, string> = {
@@ -26,14 +25,15 @@ export function registerErrorHandler(app: FastifyInstance): void {
         message: error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; '),
       });
     }
-    if (error instanceof KeycloakError) {
+    if (error instanceof IdentityProviderError) {
       const status = PASS_THROUGH_STATUSES.includes(error.status) ? error.status : 502;
-      request.log.warn({ keycloakStatus: error.status }, 'Keycloak request failed');
-      return reply.code(status).send({ error: 'keycloak_error', message: error.message });
+      request.log.warn(
+        { identityProviderStatus: error.status },
+        'Identity provider request failed',
+      );
+      return reply.code(status).send({ error: 'identity_error', message: error.message });
     }
 
-    // Errors raised by Fastify and its plugins for bad requests (rate limit, body too large,
-    // malformed JSON) carry a 4xx status. Those are the client's problem, not a server fault.
     const status = (error as { statusCode?: unknown }).statusCode;
     if (typeof status === 'number' && status >= 400 && status < 500) {
       return reply.code(status).send({

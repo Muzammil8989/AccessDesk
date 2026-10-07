@@ -1,3 +1,4 @@
+import { readRolesFromClaims } from '@accessdesk/identity';
 import type { AppSettings } from '@accessdesk/shared';
 import { z } from 'zod';
 
@@ -13,11 +14,9 @@ export interface OidcEndpoints {
 export interface TokenSet {
   accessToken: string;
   refreshToken: string | null;
-  /** Epoch milliseconds. */
   expiresAt: number;
 }
 
-/** Thrown when Keycloak rejects a grant, for example an expired or revoked refresh token. */
 export class OidcError extends Error {
   constructor(
     message: string,
@@ -44,28 +43,27 @@ const tokenResponseSchema = z.object({
 });
 
 export async function discover(
-  settings: Pick<AppSettings, 'keycloakUrl' | 'realm'>,
+  settings: Pick<AppSettings, 'issuerUrl'>,
   fetchFn: FetchFn = fetch,
 ): Promise<OidcEndpoints> {
-  const issuer = `${settings.keycloakUrl}/realms/${encodeURIComponent(settings.realm)}`;
+  const issuer = settings.issuerUrl;
   let response: Response;
   try {
     response = await fetchFn(`${issuer}/.well-known/openid-configuration`, {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {
-    throw new OidcError(`Could not reach Keycloak at ${settings.keycloakUrl}`);
+    throw new OidcError(`Could not reach the identity provider at ${issuer}`);
   }
   if (!response.ok) {
     throw new OidcError(
-      `Keycloak realm "${settings.realm}" was not found (HTTP ${response.status}). Check the URL and realm.`,
+      `No OpenID configuration was found at ${issuer} (HTTP ${response.status}). Check the issuer URL.`,
     );
   }
   const doc = discoverySchema.parse(await response.json());
-  // The API checks tokens against this same issuer, so a mismatch would fail later anyway.
   if (doc.issuer !== issuer) {
     throw new OidcError(
-      `Keycloak reports issuer "${doc.issuer}" but the settings point to "${issuer}". Use the URL Keycloak is configured with.`,
+      `The identity provider reports issuer "${doc.issuer}" but the settings point to "${issuer}". Use the exact issuer URL it is configured with.`,
     );
   }
   return {
@@ -96,7 +94,6 @@ export function buildAuthorizationUrl(args: {
   return url.toString();
 }
 
-// Public client: no client_secret is ever sent. PKCE proves the caller started the flow.
 async function postToken(
   endpoint: string,
   form: Record<string, string>,
@@ -112,7 +109,7 @@ async function postToken(
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {
-    throw new OidcError('Could not reach Keycloak');
+    throw new OidcError('Could not reach the identity provider');
   }
 
   const body: unknown = await response.json().catch(() => null);
@@ -124,7 +121,7 @@ async function postToken(
     const description = error.success
       ? (error.data.error_description ?? error.data.error)
       : response.statusText;
-    throw new OidcError(`Keycloak rejected the request: ${description}`, code);
+    throw new OidcError(`The identity provider rejected the request: ${description}`, code);
   }
 
   const tokens = tokenResponseSchema.parse(body);
@@ -177,7 +174,6 @@ export function refreshTokens(args: {
   );
 }
 
-/** Ends the Keycloak SSO session from the back channel. Best effort: local sign-out never depends on it. */
 export async function endSession(args: {
   endpoints: OidcEndpoints;
   clientId: string;
@@ -192,27 +188,33 @@ export async function endSession(args: {
       body: new URLSearchParams({ client_id: args.clientId, refresh_token: args.refreshToken }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-  } catch {
-    // Ignore: the tokens are discarded locally either way.
-  }
+  } catch {}
 }
 
-const claimsSchema = z.object({
+const displayClaimsSchema = z.object({
   preferred_username: z.string().optional(),
   name: z.string().optional(),
-  realm_access: z.object({ roles: z.array(z.string()) }).optional(),
 });
 
-/**
- * Reads claims for display only. The signature is NOT checked here: the API verifies
- * every token, and nothing in the desktop app makes a security decision from these values.
- */
-export function readDisplayClaims(accessToken: string): z.infer<typeof claimsSchema> {
+export interface DisplayClaims {
+  username?: string;
+  name?: string;
+  roles: string[];
+}
+
+export function readDisplayClaims(accessToken: string, rolesClaimPath: string): DisplayClaims {
   try {
     const payload = accessToken.split('.')[1];
-    if (!payload) return {};
-    return claimsSchema.parse(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')));
+    if (!payload) return { roles: [] };
+    const claims: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (typeof claims !== 'object' || claims === null) return { roles: [] };
+    const display = displayClaimsSchema.parse(claims);
+    let roles: string[] = [];
+    try {
+      roles = readRolesFromClaims(claims, rolesClaimPath);
+    } catch {}
+    return { username: display.preferred_username, name: display.name, roles };
   } catch {
-    return {};
+    return { roles: [] };
   }
 }

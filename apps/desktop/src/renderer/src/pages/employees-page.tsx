@@ -40,11 +40,9 @@ export function EmployeesPage() {
         max: PAGE_SIZE,
       }),
     placeholderData: keepPreviousData,
-    // Only retry what can pass by itself (network, 5xx). A 4xx or a bad response will not.
     retry: (count, error) => error instanceof ApiRequestError && error.retryable && count < 2,
   });
 
-  // The session ended while this screen was open: refresh auth state so the guard shows login.
   const status = employees.error instanceof ApiRequestError ? employees.error.status : null;
   useEffect(() => {
     if (status === 401) void queryClient.invalidateQueries({ queryKey: authQuery.queryKey });

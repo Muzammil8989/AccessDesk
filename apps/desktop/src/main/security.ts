@@ -1,12 +1,9 @@
 import path from 'node:path';
 
-// In production the UI is served from a custom scheme we control, not from file://.
-// That gives the page a real origin to check and lets us attach a CSP header.
 export const APP_SCHEME = 'app';
 export const APP_HOST = 'accessdesk';
 export const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
 
-/** Compares scheme + host + port. `URL.origin` is "null" for custom schemes, so build it by hand. */
 export function originOf(url: string): string | null {
   try {
     const parsed = new URL(url);
@@ -20,11 +17,6 @@ export function isAllowedNavigation(url: string, appOrigin: string): boolean {
   return originOf(url) === appOrigin;
 }
 
-/**
- * Strict policy: only our own scripts and styles, nothing loaded from the network, no frames,
- * no forms. The renderer never calls a server directly. Everything goes through IPC to main.
- * The dev server needs inline scripts and a WebSocket for hot reload, so it gets a looser policy.
- */
 export function buildCsp(devServerOrigin?: string): string {
   const dev = devServerOrigin !== undefined;
   const directives: Record<string, string> = {
@@ -44,10 +36,6 @@ export function buildCsp(devServerOrigin?: string): string {
     .join('; ');
 }
 
-/**
- * Maps a request path to a file inside `rendererDir`, or null when it would escape it
- * (path traversal) or is malformed.
- */
 export function resolveAppFile(rendererDir: string, pathname: string): string | null {
   let relative: string;
   try {

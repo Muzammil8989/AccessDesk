@@ -3,8 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { apiPathSchema, createApiClient } from '../../../src/main/apiClient';
 
 const settings: AppSettings = {
-  keycloakUrl: 'http://kc.test',
-  realm: 'r',
+  issuerUrl: 'http://idp.test/realms/r',
   clientId: 'accessdesk',
   apiUrl: 'http://api.test',
 };

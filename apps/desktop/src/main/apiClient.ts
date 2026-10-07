@@ -3,7 +3,6 @@ import { z } from 'zod';
 import type { ApiQuery, ApiResponse } from '../shared/ipc';
 import type { AuthService } from './auth/service';
 
-// Only plain lowercase path segments plus IDs. Blocks "..", full URLs and query smuggling.
 export const apiPathSchema = z.string().regex(/^\/[a-z][a-z0-9-]*(\/[A-Za-z0-9-]+)*$/);
 
 const errorBodySchema = z.object({ message: z.string() });
@@ -20,7 +19,6 @@ export function createApiClient(deps: ApiClientDeps) {
   async function send(url: string, token: string): Promise<Response> {
     return doFetch(url, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      // The token must only ever go to the configured API, never to a redirect target.
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
     });
@@ -35,7 +33,11 @@ export function createApiClient(deps: ApiClientDeps) {
       try {
         token = await deps.auth.getAccessToken();
       } catch {
-        return { ok: false, status: 0, message: 'Could not reach Keycloak to renew your session' };
+        return {
+          ok: false,
+          status: 0,
+          message: 'Could not reach the identity provider to renew your session',
+        };
       }
       if (!token) return { ok: false, status: 401, message: 'You are not signed in' };
 
@@ -45,7 +47,6 @@ export function createApiClient(deps: ApiClientDeps) {
       try {
         let response = await send(url.toString(), token);
         if (response.status === 401) {
-          // The token may have been revoked or rotated: try once with a fresh one.
           const fresh = await deps.auth.forceRefresh();
           if (fresh) response = await send(url.toString(), fresh);
         }

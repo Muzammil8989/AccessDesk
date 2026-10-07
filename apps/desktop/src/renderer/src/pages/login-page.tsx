@@ -42,7 +42,7 @@ export function LoginPage() {
               </Button>
             </>
           ) : (
-            <Button onClick={() => login.mutate()}>Sign in with Keycloak</Button>
+            <Button onClick={() => login.mutate()}>Sign in</Button>
           )}
           {failure && (
             <p role="alert" className="text-sm text-destructive">

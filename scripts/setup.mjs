@@ -1,4 +1,3 @@
-// One-time project setup: pnpm setup
 import {
   checkNode,
   ensureEnvFile,

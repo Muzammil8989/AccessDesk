@@ -1,6 +1,6 @@
 # AccessDesk
 
-**Employee onboarding and offboarding on top of Keycloak, for HR and IT admins.**
+**Employee onboarding and offboarding on top of your identity provider, for HR and IT admins.**
 
 [![CI](https://github.com/Muzammil8989/AccessDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Muzammil8989/AccessDesk/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/Muzammil8989/AccessDesk/actions/workflows/codeql.yml/badge.svg)](https://github.com/Muzammil8989/AccessDesk/actions/workflows/codeql.yml)
@@ -10,8 +10,11 @@
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 AccessDesk is an open source desktop application (a web build will follow) that gives HR and IT admins
-one place to **onboard and offboard employees** using [Keycloak](https://www.keycloak.org/) as the
-identity provider. It does not replace Keycloak and does not copy its data.
+one place to **onboard and offboard employees** using your existing OpenID Connect identity provider.
+It does not replace the identity provider and does not copy its data. The API talks to it through a
+provider-neutral interface ([ADR 0007](docs/adr/0007-identity-provider-interface.md),
+[ADR 0009](docs/adr/0009-provider-neutral-naming.md)). One adapter exists today; its setup guide is
+[here](docs/keycloak-setup.md).
 
 > [!NOTE]
 > **Status: early development (v0.1.0).** Login, a protected app shell, the Employees list and the
@@ -38,16 +41,18 @@ identity provider. It does not replace Keycloak and does not copy its data.
 
 The data is split by ownership, so there is never a second copy of identity to keep in sync:
 
-- **Keycloak is the source of truth for identity**: users, roles, groups, sessions and login events.
+- **The identity provider is the source of truth for identity**: users, roles, groups, sessions and
+  login events.
 - **AccessDesk's own PostgreSQL database holds app data only**: onboarding templates, checklists,
-  scheduled actions, offboarding snapshots and the app's audit log. Employees are referenced by their
-  Keycloak user ID (`sub`). Names and emails are never copied.
+  scheduled actions, offboarding snapshots and the app's audit log (append-only, enforced by a
+  database trigger). Employees are referenced by their identity provider subject ID (the OIDC `sub`).
+  Names and emails are never copied.
 
 Security properties that shape the design:
 
 - **Actions are attributed to the real admin.** The API forwards the logged-in admin's own token to the
-  Keycloak Admin API instead of using a shared service account, so Keycloak's admin events name the
-  person who made the change ([ADR 0003](docs/adr/0003-forward-the-admins-own-token.md)).
+  identity provider's admin API instead of using a shared service account, so its admin events name
+  the person who made the change ([ADR 0003](docs/adr/0003-forward-the-admins-own-token.md)).
 - **The UI never holds a token.** The renderer is sandboxed with no Node access. Tokens live in the
   Electron main process, encrypted with the operating system's secure storage.
 - **Login uses the system browser** with Authorization Code + PKCE, and no client secret is needed
@@ -59,13 +64,13 @@ Security properties that shape the design:
 
 ### Prerequisites
 
-| Requirement                                                | Notes                                                         |
-| ---------------------------------------------------------- | ------------------------------------------------------------- |
-| [Node.js](https://nodejs.org/) 22.22.1+                    | `.nvmrc` pins Node 24                                         |
-| [pnpm](https://pnpm.io/) 12                                | The `packageManager` field pins `pnpm@12.9.1`                 |
-| [Docker](https://www.docker.com/)                          | Runs the local PostgreSQL 16 database                         |
-| A running Keycloak with a configured realm                 | See [Keycloak requirements](docs/keycloak-setup.md)           |
-| An account with the `super-admin` or `hr-admin` realm role | Anyone else is refused by the API and sees a "no access" page |
+| Requirement                                          | Notes                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------- |
+| [Node.js](https://nodejs.org/) 22.22.1+              | `.nvmrc` pins Node 24                                         |
+| [pnpm](https://pnpm.io/) 12                          | The `packageManager` field pins `pnpm@12.9.1`                 |
+| [Docker](https://www.docker.com/)                    | Runs the local PostgreSQL 16 database                         |
+| A running OpenID Connect identity provider           | See the [provider setup guide](docs/keycloak-setup.md)        |
+| An account with the `super-admin` or `hr-admin` role | Anyone else is refused by the API and sees a "no access" page |
 
 ### Install and run
 
@@ -79,42 +84,48 @@ pnpm dev:all     # starts the database, then the API and the desktop app togethe
 > Use `pnpm run setup`, not `pnpm setup`. `pnpm setup` is a built-in pnpm command that configures pnpm
 > itself and does not run this repository's setup script.
 
-On first launch the desktop app opens a **setup wizard** for the Keycloak URL, realm, client ID and
-API URL. These are public values saved locally. No secret is ever asked for.
+On first launch the desktop app opens a **setup wizard** for the issuer URL, client ID and API
+URL. These are public values saved locally. No secret is ever asked for.
 
 ## Configuration
 
 `pnpm run setup` copies [.env.example](.env.example) to `.env`. Never commit `.env`.
 
-| Variable                | Required | Default                 | Purpose                                                        |
-| ----------------------- | -------- | ----------------------- | -------------------------------------------------------------- |
-| `KEYCLOAK_URL`          | Yes      | `http://localhost:8080` | Base URL of your Keycloak server                               |
-| `KEYCLOAK_REALM`        | Yes      | `company-platform`      | Realm that holds your users and roles                          |
-| `KEYCLOAK_CLIENT_ID`    | Yes      | `accessdesk`            | Public client used by the desktop app                          |
-| `KEYCLOAK_AUDIENCE`     | No       | `KEYCLOAK_CLIENT_ID`    | Expected `aud` claim of access tokens                          |
-| `DATABASE_URL`          | Yes      | local PostgreSQL        | Connection string for AccessDesk's own database                |
-| `POSTGRES_PASSWORD`     | No       | `change-me`             | Password for the Docker database. Change it outside local use  |
-| `API_PORT`              | No       | `4000`                  | Port the API listens on                                        |
-| `API_HOST`              | No       | `127.0.0.1`             | Bind address. Use `0.0.0.0` only behind a reverse proxy        |
-| `API_TRUST_PROXY`       | No       | `false`                 | Trust `X-Forwarded-*` headers. Only behind a proxy you control |
-| `RATE_LIMIT_PER_MINUTE` | No       | `300`                   | Requests per client IP per minute before the API answers `429` |
-| `LOG_LEVEL`             | No       | `info`                  | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` |
+| Variable                | Required | Default                                         | Purpose                                                        |
+| ----------------------- | -------- | ----------------------------------------------- | -------------------------------------------------------------- |
+| `IDENTITY_PROVIDER`     | No       | `keycloak`                                      | Which adapter talks to the identity provider (only one exists) |
+| `IDENTITY_ISSUER_URL`   | Yes      | `http://localhost:8080/realms/company-platform` | The OIDC issuer: the `iss` of its tokens                       |
+| `IDENTITY_CLIENT_ID`    | Yes      | `accessdesk`                                    | Public client used by the desktop app                          |
+| `IDENTITY_AUDIENCE`     | No       | `IDENTITY_CLIENT_ID`                            | Expected `aud` claim of access tokens                          |
+| `AUTH_ADMIN_ROLES`      | No       | `super-admin,hr-admin`                          | Comma-separated roles that may use AccessDesk (any one)        |
+| `AUTH_ROLES_CLAIM_PATH` | No       | `realm_access.roles`                            | Dot-separated path to the role names in the access token       |
+| `DATABASE_URL`          | Yes      | local PostgreSQL                                | Connection string for AccessDesk's own database                |
+| `POSTGRES_PASSWORD`     | No       | `change-me`                                     | Password for the Docker database. Change it outside local use  |
+| `API_PORT`              | No       | `4000`                                          | Port the API listens on                                        |
+| `API_HOST`              | No       | `127.0.0.1`                                     | Bind address. Use `0.0.0.0` only behind a reverse proxy        |
+| `API_TRUST_PROXY`       | No       | `false`                                         | Trust `X-Forwarded-*` headers. Only behind a proxy you control |
+| `RATE_LIMIT_PER_MINUTE` | No       | `300`                                           | Requests per client IP per minute before the API answers `429` |
+| `LOG_LEVEL`             | No       | `info`                                          | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` |
+
+The API and the desktop app both read `AUTH_ADMIN_ROLES` and `AUTH_ROLES_CLAIM_PATH`, from this same
+`.env` and with the same validation, so the UI and the API cannot disagree about who is an admin. The
+desktop settings wizard asks only for the issuer URL, the client ID and the API URL.
 
 ## Commands
 
 Run all commands from the repository root.
 
-| Command              | What it does                                                     |
-| -------------------- | ---------------------------------------------------------------- |
-| `pnpm run setup`     | One-time setup: `.env`, PostgreSQL, migrations, seed             |
-| `pnpm dev:all`       | Database, migrations, then API and desktop app                   |
-| `pnpm dev`           | API and desktop app only (database already running)              |
-| `pnpm check`         | Everything CI runs: lint, format, typecheck, test, build         |
-| `pnpm test`          | Unit and integration tests in every package                      |
-| `pnpm test:coverage` | Tests with a coverage report and minimum thresholds              |
-| `pnpm test:e2e`      | Build, then an end-to-end test (mock Keycloak, real API and app) |
-| `pnpm db:up`         | Start the local PostgreSQL container                             |
-| `pnpm db:migrate`    | Create and apply a migration after editing `schema.prisma`       |
+| Command              | What it does                                                              |
+| -------------------- | ------------------------------------------------------------------------- |
+| `pnpm run setup`     | One-time setup: `.env`, PostgreSQL, migrations, seed                      |
+| `pnpm dev:all`       | Database, migrations, then API and desktop app                            |
+| `pnpm dev`           | API and desktop app only (database already running)                       |
+| `pnpm check`         | Everything CI runs: lint, naming check, format, typecheck, test, build    |
+| `pnpm test`          | Unit and integration tests in every package                               |
+| `pnpm test:coverage` | Tests with a coverage report and minimum thresholds                       |
+| `pnpm test:e2e`      | Build, then an end-to-end test (mock identity provider, real API and app) |
+| `pnpm db:up`         | Start the local PostgreSQL container                                      |
+| `pnpm db:migrate`    | Create and apply a migration after editing `schema.prisma`                |
 
 The full list, with the Git hooks and testing conventions, is in the
 [development guide](docs/development.md).
@@ -137,10 +148,10 @@ The full list, with the Git hooks and testing conventions, is in the
                   │                                       │ HTTPS
                   ▼                                       │ Authorization: Bearer <admin's token>
         ┌──────────────────┐                              ▼
-        │     Keycloak     │◄──────────────────┌──────────────────────┐
+        │ Identity provider│◄──────────────────┌──────────────────────┐
         │ users, roles,    │  Admin REST API   │ AccessDesk API       │
         │ groups, sessions,│  (admin's own     │ (Fastify)            │
-        │ login events     │   token)          │ - verify JWT (JWKS)  │
+        │ login events     │   token)          │ - verify JWT (OIDC)  │
         └──────────────────┘                   │ - require admin role │
                                                └──────────┬───────────┘
                                                           │ Prisma
@@ -163,9 +174,10 @@ apps/
   desktop/              Electron + React   src/ (main, preload, renderer, shared)   test/ (unit, e2e)
 packages/
   shared/               Zod schemas and types for desktop and API        src/  test/
-  keycloak-client/      ALL Keycloak Admin REST calls, one typed interface   src/  test/
-docs/                   development guide, Keycloak setup, security rules
-scripts/                repo automation (setup, dev:all, clean)
+  identity/             IdentityProvider interface, neutral types, access policy, contract test  src/  test/
+  identity-keycloak/    The adapter for the first supported provider: ALL of its admin API calls  src/  test/
+docs/                   development guide, provider setup, security rules
+scripts/                repo automation (setup, dev:all, clean) and the naming check
 ```
 
 Every app and package keeps its tests in its own `test/` folder and has its own README. The annotated
@@ -179,7 +191,7 @@ tree and the testing conventions are in the [development guide](docs/development
 | UI       | Tailwind CSS, shadcn/ui-style components, Radix UI                                  |
 | API      | Fastify, Zod, Prisma, pg-boss (scheduled jobs, not wired up yet)                    |
 | Database | PostgreSQL 16                                                                       |
-| Identity | Keycloak (OIDC, Authorization Code + PKCE, Admin REST API)                          |
+| Identity | OpenID Connect (Authorization Code + PKCE) through a provider adapter               |
 | Tooling  | TypeScript (strict), pnpm workspaces, Turborepo, Vitest, Playwright                 |
 | Quality  | ESLint (type-aware, accessibility and architecture-boundary rules), Prettier, Husky |
 
@@ -187,23 +199,26 @@ tree and the testing conventions are in the [development guide](docs/development
 
 **Working**
 
-- Setup wizard, with a "Test connection" check against Keycloak discovery
-- Login with PKCE through the system browser, token refresh, sign-out (which also ends the Keycloak
-  session) and session restore after a restart
+- Setup wizard, with a "Test connection" check against OIDC discovery
+- Login with PKCE through the system browser, token refresh, sign-out (which also ends the identity
+  provider session) and session restore after a restart
 - Protected layout and role-aware sidebar (Employees, Onboard, Offboard, Access Review, Audit Log,
   Settings)
 - Employees list with search, pagination, and loading, empty and error states (desktop to API to
-  Keycloak)
+  identity provider)
 - API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id`
 - PostgreSQL schema, first migration and seed
-- `packages/keycloak-client` with unit tests (mocked `fetch`)
+- `packages/identity` (the provider-neutral interface) and `packages/identity-keycloak` (its adapter),
+  with unit and contract tests (mocked `fetch`)
 
 **Not built yet**
 
 - Onboard, Offboard, Access Review and Audit Log screens (placeholders today)
 - Employee detail and edit screens (the API route for one employee exists)
-- API routes for the Keycloak client's write functions (create, disable, log out sessions, groups,
+- API routes for the identity provider's write functions (create, disable, end sessions, groups,
   roles). The functions are implemented and tested, but no route calls them yet.
+- Identity providers other than the first one. The API depends on an interface, so one can be added
+  ([ADR 0009](docs/adr/0009-provider-neutral-naming.md)), but only one adapter exists.
 - Scheduled jobs. `apps/api/src/infra/jobs.ts` is a stub.
 - Playwright specs (a config and one end-to-end smoke script exist), packaging and installers, and the
   web build
@@ -217,7 +232,7 @@ tree and the testing conventions are in the [development guide](docs/development
 
 - [Development guide](docs/development.md): commands, layout, testing, adding a feature
 - [Coding standards](docs/coding-standards.md): code style, SOLID, design patterns, system design
-- [Keycloak requirements](docs/keycloak-setup.md): what your realm needs
+- [Provider setup guide](docs/keycloak-setup.md): what the first supported provider needs
 - [Security rules](docs/security.md): the rules, API hardening, supply chain, and where each is tested
 - [Architecture decisions](docs/adr/README.md): why the project is built this way
 - [Project as a prompt](docs/project-prompt.md): everything in the code, written so it can be rebuilt or
@@ -232,8 +247,8 @@ tree and the testing conventions are in the [development guide](docs/development
 | `pnpm setup` changes your shell profile or does not create `.env`                              | That is pnpm's built-in command. Run `pnpm run setup` instead.                                                                                                                                   |
 | Electron crashes on start with `Cannot read properties of undefined (reading 'enableSandbox')` | `ELECTRON_RUN_AS_NODE` is set (editors built on Electron, such as VS Code, can leak it). `pnpm dev` clears it for you in `electron.vite.config.ts`. If you start Electron another way, unset it. |
 | `pnpm run setup` says Docker failed                                                            | Start Docker Desktop and run it again.                                                                                                                                                           |
-| Login fails with an issuer message in the wizard                                               | Keycloak reports a different URL than the one you typed (for example behind a proxy). Use the URL Keycloak is configured with, and the same value in `KEYCLOAK_URL`.                             |
-| `403` on the Employees list                                                                    | The token is valid, but the admin lacks a Keycloak `realm-management` role such as `view-users`, or lacks `super-admin` / `hr-admin`.                                                            |
+| Login fails with an issuer message in the wizard                                               | The identity provider reports a different issuer than the URL you typed (for example behind a proxy). Use the exact issuer it is configured with, and the same value in `IDENTITY_ISSUER_URL`.   |
+| `403` on the Employees list                                                                    | The token is valid, but the admin lacks a permission in the identity provider to read users (see the provider setup guide), or lacks an admin role (`AUTH_ADMIN_ROLES`).                         |
 | Linux: the session ends when you quit the app                                                  | Secure storage needs a running keyring (libsecret). Without it the session lasts only until you quit.                                                                                            |
 
 ## Contributing

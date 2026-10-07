@@ -1,4 +1,4 @@
-import type { KeycloakClient } from '@accessdesk/keycloak-client';
+import type { IdentityProvider } from '@accessdesk/identity';
 import type { Template } from '@accessdesk/shared';
 import {
   SignJWT,
@@ -12,18 +12,19 @@ import {
 import { vi } from 'vitest';
 import { buildApp } from '../../src/app';
 import type { Config } from '../../src/config';
-import { createKeycloakClientFactory } from '../../src/infra/keycloak';
+import { createIdentityProviderFactory } from '../../src/infra/identity';
 import type { TemplateRepository } from '../../src/modules/templates/templates.repository';
 
-export const ISSUER = 'http://kc.test/realms/company-platform';
+export const ISSUER = 'http://idp.test/realms/company-platform';
 export const AUDIENCE = 'accessdesk';
 export const USER_ID = '8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11';
 
 export const testConfig: Config = {
-  keycloakUrl: 'http://kc.test',
-  realm: 'company-platform',
+  identityProvider: 'keycloak',
   issuer: ISSUER,
   audience: AUDIENCE,
+  adminRoles: ['super-admin', 'hr-admin'],
+  rolesClaimPath: 'realm_access.roles',
   databaseUrl: 'postgresql://unused',
   port: 0,
   host: '127.0.0.1',
@@ -34,6 +35,7 @@ export const testConfig: Config = {
 
 export interface TokenOptions {
   roles?: string[];
+  claims?: Record<string, unknown>;
   issuer?: string;
   audience?: string;
   expiresIn?: string;
@@ -42,11 +44,11 @@ export interface TokenOptions {
 
 export interface AuthHarness {
   keyResolver: JWTVerifyGetKey;
+  jwks: { keys: JWK[] };
   makeToken(options?: TokenOptions): Promise<string>;
   makeHs256Token(): Promise<string>;
 }
 
-/** Real signing keys and a local JWKS, so tests exercise real JWT verification. */
 export async function createAuthHarness(): Promise<AuthHarness> {
   const trusted = await generateKeyPair('RS256');
   const untrusted: CryptoKey = (await generateKeyPair('RS256')).privateKey;
@@ -59,8 +61,9 @@ export async function createAuthHarness(): Promise<AuthHarness> {
 
   return {
     keyResolver: createLocalJWKSet({ keys: [jwk] }),
+    jwks: { keys: [jwk] },
     makeToken: (options = {}) =>
-      new SignJWT({ realm_access: { roles: options.roles ?? ['hr-admin'] } })
+      new SignJWT(options.claims ?? { realm_access: { roles: options.roles ?? ['hr-admin'] } })
         .setProtectedHeader({ alg: 'RS256', kid: 'test' })
         .setSubject('admin-1')
         .setIssuer(options.issuer ?? ISSUER)
@@ -97,13 +100,12 @@ export function fakeTemplateRepository(
 }
 
 export interface TestAppOptions {
-  /** A fake Keycloak client. Wins over `fetch`. */
-  keycloak?: Partial<KeycloakClient>;
-  /** Goes through the real Keycloak client, to test what is sent over the wire. */
+  identity?: Partial<IdentityProvider>;
   fetch?: typeof fetch;
   templates?: TemplateRepository;
   checkDatabase?: () => Promise<void>;
   config?: Partial<Config>;
+  discoverKeys?: boolean;
 }
 
 export function buildTestApp(harness: AuthHarness, options: TestAppOptions = {}) {
@@ -111,11 +113,12 @@ export function buildTestApp(harness: AuthHarness, options: TestAppOptions = {})
   return buildApp({
     config,
     templates: options.templates ?? fakeTemplateRepository(),
-    keycloakFor: options.keycloak
-      ? () => options.keycloak as KeycloakClient
-      : createKeycloakClientFactory(config, options.fetch),
+    identityFor: options.identity
+      ? () => options.identity as IdentityProvider
+      : createIdentityProviderFactory(config, options.fetch),
     checkDatabase: options.checkDatabase ?? (async () => undefined),
-    keyResolver: harness.keyResolver,
+    keyResolver: options.discoverKeys ? undefined : harness.keyResolver,
+    fetch: options.fetch,
   });
 }
 

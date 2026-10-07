@@ -1,0 +1,51 @@
+{
+  "$comment": "Where the first supported provider's name may appear. Everything else uses neutral words (ADR 0009). Add an entry only with a reason, and keep it as narrow as possible: a token beats a file, and a file beats a folder.",
+  "word": "keycloak",
+  "files": {
+    "packages/identity-keycloak/src/keycloak-api.ts": "The one source file that knows the provider's admin API: its URL layout and raw response shapes.",
+    "packages/identity-keycloak/README.md": "Documents the adapter for that provider.",
+    "packages/identity-keycloak/test/unit/keycloak-api.test.ts": "Tests the exact admin API calls that keycloak-api.ts makes.",
+    "docs/keycloak-setup.md": "The setup guide for the first supported provider.",
+    "docs/adr/**": "Architecture decision records: history, and the naming rule itself.",
+    "CHANGELOG.md": "History of what changed.",
+    "docker-compose.yml": "Local development services, including the provider.",
+    "apps/api/prisma/migrations/**": "Applied migrations are history and are never edited. Older ones use the old column names.",
+    "apps/api/test/integration/database-migrations.test.ts": "Builds rows in the old column layout to prove the migrations keep data.",
+    "apps/desktop/src/main/store/legacy-settings.ts": "Reads the old saved-settings shape (server URL plus realm) and converts it.",
+    "apps/desktop/test/unit/main/store/legacy-settings.test.ts": "Tests that conversion.",
+    "scripts/naming-allowlist.json": "This file."
+  },
+  "tokens": {
+    "createKeycloakIdentityProvider": "The adapter's factory function and its index export.",
+    "identity-keycloak": "The adapter package: its folder, its name and references to either.",
+    "keycloak-api": "The adapter's raw API file, as a file name or import path.",
+    "keycloak-setup.md": "Links to the provider setup guide."
+  },
+  "fileTokens": {
+    "apps/api/src/config/index.ts": {
+      "'keycloak'": "The provider ID that IDENTITY_PROVIDER accepts and defaults to."
+    },
+    "apps/api/src/infra/identity.ts": {
+      "'keycloak'": "Picks the adapter for that provider ID."
+    },
+    "apps/api/test/helpers/harness.ts": {
+      "'keycloak'": "The provider ID in the test configuration."
+    },
+    "apps/api/test/unit/config.test.ts": {
+      "'keycloak'": "Tests the provider ID setting."
+    },
+    "apps/api/test/unit/identity.factory.test.ts": {
+      "'keycloak'": "The provider ID in the test configuration.",
+      "\"keycloak\"": "The provider ID in the expected error message."
+    },
+    ".env.example": {
+      "IDENTITY_PROVIDER=keycloak": "The documented provider setting."
+    },
+    "README.md": {
+      "`keycloak`": "The provider ID in the configuration table."
+    },
+    "docs/development.md": {
+      "`keycloak`": "The provider ID in the configuration table."
+    }
+  }
+}

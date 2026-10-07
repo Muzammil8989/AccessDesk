@@ -45,10 +45,11 @@ export function AppLayout() {
   }
   if (!settings.data) return <Navigate to="/setup" replace />;
   if (!auth.data.authenticated) return <Navigate to="/login" replace />;
-  if (!hasAdminAccess(auth.data.roles)) return <Navigate to="/no-access" replace />;
+  if (!hasAdminAccess(auth.data.roles, auth.data.adminRoles))
+    return <Navigate to="/no-access" replace />;
 
   const user = auth.data;
-  const navItems = NAV_ITEMS.filter((item) => canAccess(user.roles, item.feature));
+  const navItems = NAV_ITEMS.filter((item) => canAccess(user.roles, item.feature, user.adminRoles));
   return (
     <div className="flex h-screen">
       <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar">

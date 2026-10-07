@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, net, protocol, safeStorage, session, shell } from 'electron';
+import { loadAccessPolicy } from '@accessdesk/identity';
+import dotenv from 'dotenv';
+import { app, BrowserWindow, dialog, net, protocol, safeStorage, session, shell } from 'electron';
 import { createApiClient } from './apiClient';
 import { AuthService } from './auth/service';
 import { registerIpc } from './ipc';
@@ -17,7 +19,8 @@ import { SettingsStore } from './store/settingsStore';
 import { TokenStore, type SecretCipher } from './store/tokenStore';
 import { createMainWindow } from './window';
 
-// Set by electron-vite when running `pnpm dev`. Absent in a built or packaged app.
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env'), quiet: true });
+
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
 const devServerOrigin = devServerUrl ? originOf(devServerUrl) : null;
 const appOrigin = devServerOrigin ?? APP_ORIGIN;
@@ -27,10 +30,8 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 
-// Only one copy may run: two instances would fight over the token file.
 if (!app.requestSingleInstanceLock()) app.quit();
 
-// Defence in depth for every web contents we ever create.
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-navigate', (event, url) => {
     if (!isAllowedNavigation(url, appOrigin)) event.preventDefault();
@@ -39,8 +40,6 @@ app.on('web-contents-created', (_event, contents) => {
   contents.on('will-attach-webview', (event) => event.preventDefault());
 });
 
-// Windows DPAPI, macOS Keychain or Linux libsecret. On Linux the "basic_text" fallback is
-// not real protection, so it is treated as unavailable.
 const cipher: SecretCipher = {
   isAvailable: () =>
     safeStorage.isEncryptionAvailable() &&
@@ -80,7 +79,6 @@ function addDevServerCsp(origin: string): void {
 }
 
 void app.whenReady().then(() => {
-  // The app needs no camera, microphone, notifications and so on.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
     callback(false),
   );
@@ -89,11 +87,24 @@ void app.whenReady().then(() => {
   if (devServerOrigin) addDevServerCsp(devServerOrigin);
   else serveRendererFromAppScheme();
 
+  let policy: ReturnType<typeof loadAccessPolicy>;
+  try {
+    policy = loadAccessPolicy(process.env);
+  } catch (error) {
+    dialog.showErrorBox(
+      'AccessDesk cannot start',
+      error instanceof Error ? error.message : 'Invalid access configuration',
+    );
+    app.exit(1);
+    return;
+  }
+
   const userData = app.getPath('userData');
   const settings = new SettingsStore(path.join(userData, 'settings.json'));
   const tokenStore = new TokenStore(path.join(userData, 'session.bin'), cipher);
   const auth = new AuthService({
     getSettings: () => settings.load(),
+    policy,
     tokenStore,
     openExternal: openInSystemBrowser,
   });
@@ -115,7 +126,6 @@ void app.whenReady().then(() => {
     window.focus();
   });
 
-  // macOS: clicking the dock icon with no window open.
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow();
   });

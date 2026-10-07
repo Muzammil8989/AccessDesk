@@ -24,19 +24,21 @@ Contents
 A rule that depends on people remembering it will be broken. Where possible the tools enforce it, and
 `pnpm check` (also run by CI) runs all of them.
 
-| Rule                                                           | Enforced by                                                       |
-| -------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Formatting: 2 spaces, single quotes, semicolons, width 100, LF | Prettier ([.prettierrc](../.prettierrc)), `.editorconfig`         |
-| `strict` types, indexed access can be `undefined`, `override`  | [tsconfig.base.json](../tsconfig.base.json)                       |
-| No forgotten `await`, no unsafe `any` flows                    | typescript-eslint, type-checked rules                             |
-| `import type` for type-only imports                            | `consistent-type-imports`                                         |
-| Every `switch` over a union handles every case                 | `switch-exhaustiveness-check`                                     |
-| `===` only, `const` by default, no `var`                       | `eqeqeq`, `prefer-const`, `no-var`                                |
-| No `console.log` in production code (use the logger)           | `no-console` (`warn` and `error` allowed)                         |
-| Layers do not import each other the wrong way                  | `no-restricted-imports` ([eslint.config.js](../eslint.config.js)) |
-| Keycloak Admin URLs appear only in `packages/keycloak-client`  | `no-restricted-syntax`                                            |
-| Accessible JSX, hooks rules                                    | `eslint-plugin-jsx-a11y`, `eslint-plugin-react-hooks`             |
-| Lint and format on commit, typecheck and tests on push         | Husky + lint-staged                                               |
+| Rule                                                              | Enforced by                                                       |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Formatting: 2 spaces, single quotes, semicolons, width 100, LF    | Prettier ([.prettierrc](../.prettierrc)), `.editorconfig`         |
+| `strict` types, indexed access can be `undefined`, `override`     | [tsconfig.base.json](../tsconfig.base.json)                       |
+| No forgotten `await`, no unsafe `any` flows                       | typescript-eslint, type-checked rules                             |
+| `import type` for type-only imports                               | `consistent-type-imports`                                         |
+| Every `switch` over a union handles every case                    | `switch-exhaustiveness-check`                                     |
+| `===` only, `const` by default, no `var`                          | `eqeqeq`, `prefer-const`, `no-var`                                |
+| No `console.log` in production code (use the logger)              | `no-console` (`warn` and `error` allowed)                         |
+| Layers do not import each other the wrong way                     | `no-restricted-imports` ([eslint.config.js](../eslint.config.js)) |
+| Identity provider admin URLs appear only in `packages/identity-*` | `no-restricted-syntax`                                            |
+| Only `server.ts` and `infra/identity.ts` import an adapter        | `no-restricted-imports` (pattern `@accessdesk/identity-*`)        |
+| The vendor name appears only where the allowlist says             | `scripts/check-naming.mjs`, `scripts/naming-allowlist.json`       |
+| Accessible JSX, hooks rules                                       | `eslint-plugin-jsx-a11y`, `eslint-plugin-react-hooks`             |
+| Lint and format on commit, typecheck and tests on push            | Husky + lint-staged                                               |
 
 If you want to add a rule, prefer a lint rule over a paragraph in this file.
 
@@ -46,9 +48,10 @@ If you want to add a rule, prefer a lint rule over a paragraph in this file.
 
 ### 2.1 The big picture
 
-AccessDesk is a desktop app for HR and admins to onboard and offboard employees. **Keycloak is the
-source of identity** ([ADR 0001](adr/0001-keycloak-is-the-source-of-identity.md)): people, roles and
-groups live there. Our PostgreSQL database holds only app data such as templates.
+AccessDesk is a desktop app for HR and admins to onboard and offboard employees. **The identity
+provider is the source of identity** (ADR 0001): people, roles and groups live there. Our PostgreSQL
+database holds only app data such as templates. The API talks to it only through the provider-neutral
+`IdentityProvider` interface (ADR 0007).
 
 ```
 ┌─────────────────────────── Desktop app (Electron) ───────────────────────────┐
@@ -62,35 +65,38 @@ groups live there. Our PostgreSQL database holds only app data such as templates
                                          ▼
                      ┌───────────────────────────────────────┐
                      │ API (Fastify)                         │
-                     │ routes → service → repository/client  │
+                     │ routes → service → repository/provider│
                      └───────────┬───────────────┬───────────┘
                                  │               │
                                  ▼               ▼
-                     packages/keycloak-client   PostgreSQL (Prisma)
-                     (ALL Keycloak Admin calls)  templates, app data
+                     packages/identity-keycloak  PostgreSQL (Prisma)
+                     (ALL admin API calls)       templates, app data
                                  │
                                  ▼
-                              Keycloak
+                         Identity provider
 
-            packages/shared: Zod schemas, types, role permissions (used by app and API)
+   packages/identity: the neutral IdentityProvider interface and the access policy
+   packages/shared: Zod schemas, types, role permissions (used by app and API)
 ```
 
 ### 2.2 Trust boundaries
 
 Most design decisions follow from one question: _who do we trust at this point?_
 
-| Boundary                | We trust              | Rule                                                                                                                |
-| ----------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Renderer → main process | Nothing from the UI   | Only the typed IPC contract ([ipc.ts](../apps/desktop/src/shared/ipc.ts)); the renderer never sees a token          |
-| Desktop → API           | The signed JWT        | The API verifies issuer, audience and signature on every request                                                    |
-| API → Keycloak          | The admin's own token | We forward it ([ADR 0003](adr/0003-forward-the-admins-own-token.md)), so Keycloak's audit log names the real person |
-| Anything → our code     | Nothing               | Validate with Zod at the boundary, including API responses in the UI                                                |
+| Boundary                | We trust              | Rule                                                                                                                    |
+| ----------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Renderer → main process | Nothing from the UI   | Only the typed IPC contract ([ipc.ts](../apps/desktop/src/shared/ipc.ts)); the renderer never sees a token              |
+| Desktop → API           | The signed JWT        | The API verifies issuer, audience and signature on every request                                                        |
+| API → identity provider | The admin's own token | We forward it ([ADR 0003](adr/0003-forward-the-admins-own-token.md)), so the provider's audit log names the real person |
+| Anything → our code     | Nothing               | Validate with Zod at the boundary, including API responses in the UI                                                    |
 
 ### 2.3 Monorepo and dependency direction
 
 ```
-apps/desktop ──► packages/shared
-apps/api     ──► packages/shared, packages/keycloak-client
+apps/desktop ──► packages/shared, packages/identity
+apps/api     ──► packages/shared, packages/identity
+apps/api     ──► packages/identity-keycloak (only server.ts and infra/identity.ts)
+packages/identity-keycloak ──► packages/identity
 packages/*   ──► (never apps/*)
 apps/api     ──► (never apps/desktop)
 ```
@@ -105,7 +111,7 @@ This is checked by lint, not by good intentions.
    on `401` with a refreshed token.
 3. API route validates the query with `listEmployeesQuerySchema`, builds a service for this request with
    the caller's token.
-4. The service asks the `KeycloakClient` interface for users and a count, and maps them with
+4. The service asks the `IdentityProvider` interface for users and a count, and maps them with
    `toEmployee`.
 5. Errors go to one error handler, which turns them into short, safe messages.
 6. The renderer parses the response with the shared schema before using it.
@@ -143,7 +149,7 @@ app.get('/employees/:id', async (request): Promise<Employee> => {
 });
 ```
 
-**Breaking it:** a route that builds a Keycloak URL, calls `fetch`, filters the result and formats the
+**Breaking it:** a route that builds an identity provider URL, calls `fetch`, filters the result and formats the
 JSON. Testing a filtering rule would then need a fake HTTP server. This is what
 [ADR 0005](adr/0005-layers-and-dependency-injection.md) fixed.
 
@@ -156,7 +162,7 @@ JSON. Testing a filtering rule would then need a fake HTTP server. This is what
 - **Add a storage backend:** write another class that implements `TemplateRepository`. No route changes.
 - **Add an error type:** the error handler is a list of cases and a lookup table (`CLIENT_ERROR_CODES`).
   Extending the table does not rewrite the logic.
-- **Add a permission feature:** add it to `FEATURES`. Because `FEATURE_ROLES` is typed
+- **Add a permission feature:** add it to `FEATURES`. Because `FEATURE_ACCESS` is typed
   `Record<Feature, ...>`, the compiler fails until you also say who may use it, so you cannot forget.
 
 Use types so that "forgetting to extend" is a compile error, not a production bug. That is why a
@@ -179,7 +185,8 @@ tests ([memory-token-storage.ts](../apps/desktop/test/unit/main/helpers/memory-t
 
 A fake that behaves differently from the real thing (say, one that throws where the real one returns
 `null`) makes tests pass for the wrong reason. **Rule: a fake must follow the same contract as the real
-implementation, including the edge cases.** The same applies to `TemplateRepository` and `KeycloakClient`.
+implementation, including the edge cases.** The same applies to `TemplateRepository` and `IdentityProvider`; the shared contract test
+(`runIdentityProviderContract`) checks it for every identity adapter.
 
 **Breaking it:** a subclass or implementation that throws "not supported", returns a different shape, or
 needs the caller to know which implementation it got.
@@ -197,9 +204,9 @@ auth: Pick<AuthService, 'getAccessToken' | 'forceRefresh'>;
 // authService.ts: needs storage, so it depends on the interface, not the file-based class
 tokenStore: TokenStorage;
 
-// employeeRoutes: needs a way to get a Keycloak client, not the app's whole config
+// employeeRoutes: needs a way to get an identity provider, not the app's whole config
 export interface EmployeeRouteDeps {
-  keycloakFor: KeycloakClientFactory;
+  identityFor: IdentityProviderFactory;
 }
 ```
 
@@ -214,15 +221,16 @@ obvious what a unit really needs.
 > `fetch`, the file system). Details depend on the abstraction.
 
 ```
-EmployeesService ──► KeycloakClient (interface) ◄── createKeycloakClient (real, HTTP)
-                                                ◄── fake in tests
+EmployeesService ──► IdentityProvider (interface) ◄── createKeycloakIdentityProvider (real, HTTP)
+                                                  ◄── fake in tests
 ```
 
 How it is wired:
 
 1. `app.ts` declares what it needs as an interface, [`AppDeps`](../apps/api/src/app.ts).
 2. [`server.ts`](../apps/api/src/server.ts) is the **composition root**: the one place that creates
-   `PrismaTemplateRepository`, the Keycloak factory and so on, and passes them in.
+   `PrismaTemplateRepository`, the identity provider factory (`createIdentityProviderFactory`) and so
+   on, and passes them in.
 3. Tests call `buildApp` with fakes. No database, no network, no Electron needed.
 
 Related rule: **only the composition root uses `new` on infrastructure.** Services receive their
@@ -239,21 +247,21 @@ database, and swapping storage means editing business rules.
 A pattern is a named, reusable solution. We use a pattern when it solves a problem we have, not to look
 sophisticated. Each entry says what problem it solves and where you can see it.
 
-| Pattern                                 | Problem it solves                                         | Where                                                                   |
-| --------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Dependency injection + composition root | Keep logic independent of infrastructure, make tests easy | [server.ts](../apps/api/src/server.ts), `AppDeps`                       |
-| Layered architecture                    | Separate HTTP, rules and I/O                              | `routes → service → repository/client`                                  |
-| Repository                              | Hide how data is stored behind a domain-shaped interface  | `TemplateRepository` and `PrismaTemplateRepository`                     |
-| Factory                                 | Build an object that needs per-request data               | `KeycloakClientFactory`: a client per admin token                       |
-| Facade                                  | One simple entry point over a messy API                   | `packages/keycloak-client` hides every Admin REST detail                |
-| Adapter / Mapper                        | Convert between two shapes                                | `toEmployee` (Keycloak user to AccessDesk employee)                     |
-| Strategy                                | Swap behaviour behind one interface                       | `TokenStorage` (encrypted file vs memory), `SecretCipher`               |
-| Bridge / Proxy (IPC)                    | Let an untrusted caller use a privileged one safely       | preload `window.accessdesk` and the `AccessDeskApi` contract            |
-| Single-flight (promise sharing)         | Many callers need the same slow operation, do it once     | `AuthService.refresh()` shares one in-flight token refresh              |
-| Guard                                   | Block access before the protected code runs               | `requireAuth` (API), `RequireFeature` (UI)                              |
-| Schema as contract                      | One definition of a shape, used for types and validation  | Zod schemas in `packages/shared`                                        |
-| Discriminated union (result type)       | Make success and failure explicit in the type             | `LoginResult`, `ApiResponse`: `{ ok: true, ... } \| { ok: false, ... }` |
-| Plugin                                  | Add cross-cutting behaviour without touching features     | Fastify plugins: auth, error handler, helmet, rate limit                |
+| Pattern                                 | Problem it solves                                         | Where                                                                            |
+| --------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Dependency injection + composition root | Keep logic independent of infrastructure, make tests easy | [server.ts](../apps/api/src/server.ts), `AppDeps`                                |
+| Layered architecture                    | Separate HTTP, rules and I/O                              | `routes → service → repository/client`                                           |
+| Repository                              | Hide how data is stored behind a domain-shaped interface  | `TemplateRepository` and `PrismaTemplateRepository`                              |
+| Factory                                 | Build an object that needs per-request data               | `IdentityProviderFactory`: a provider per admin token                            |
+| Facade                                  | One simple entry point over a messy API                   | `packages/identity-keycloak` hides every admin REST detail                       |
+| Adapter / Mapper                        | Convert between two shapes                                | `packages/identity-keycloak` (raw responses to `IdentityProvider`), `toEmployee` |
+| Strategy                                | Swap behaviour behind one interface                       | `TokenStorage` (encrypted file vs memory), `SecretCipher`                        |
+| Bridge / Proxy (IPC)                    | Let an untrusted caller use a privileged one safely       | preload `window.accessdesk` and the `AccessDeskApi` contract                     |
+| Single-flight (promise sharing)         | Many callers need the same slow operation, do it once     | `AuthService.refresh()` shares one in-flight token refresh                       |
+| Guard                                   | Block access before the protected code runs               | `requireAuth` (API), `RequireFeature` (UI)                                       |
+| Schema as contract                      | One definition of a shape, used for types and validation  | Zod schemas in `packages/shared`                                                 |
+| Discriminated union (result type)       | Make success and failure explicit in the type             | `LoginResult`, `ApiResponse`: `{ ok: true, ... } \| { ok: false, ... }`          |
+| Plugin                                  | Add cross-cutting behaviour without touching features     | Fastify plugins: auth, error handler, helmet, rate limit                         |
 
 ### 4.1 Worked examples
 
@@ -268,11 +276,11 @@ export interface TemplateRepository {
 
 The route never sees Prisma. A different database would be a new class implementing this interface.
 
-**Factory.** The Keycloak client needs the _calling admin's_ token, which differs per request, so a plain
+**Factory.** The identity provider needs the _calling admin's_ token, which differs per request, so a plain
 singleton does not work. We inject a factory:
 
 ```ts
-export type KeycloakClientFactory = (adminAccessToken: string) => KeycloakClient;
+export type IdentityProviderFactory = (adminAccessToken: string) => IdentityProvider;
 ```
 
 **Single-flight.** Refresh tokens may be single use. If five requests find an expired token at once and
@@ -316,16 +324,16 @@ trailing commas everywhere, 100 columns, LF line endings, final newline.
 
 ### 5.2 Naming
 
-| Thing                                        | Convention                                                  | Example                                  |
-| -------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------- |
-| Variables, functions                         | `camelCase`, verbs for functions                            | `loadConfig`, `getAccessToken`           |
-| Types, interfaces, classes, React components | `PascalCase`                                                | `AuthService`, `EmployeeList`            |
-| Constants that never change                  | `UPPER_SNAKE_CASE`                                          | `ADMIN_ROLES`, `EXPIRY_MARGIN_MS`        |
-| Booleans                                     | read as a question                                          | `enabled`, `persistent`, `isAvailable()` |
-| Zod schemas                                  | `<thing>Schema`, with `type Thing = z.infer<...>` beside it | `employeeSchema` and `Employee`          |
-| Interfaces for injected deps                 | `<Thing>Deps`                                               | `AppDeps`, `ApiClientDeps`               |
-| Units in names                               | include the unit                                            | `EXPIRY_MARGIN_MS`, `rateLimitPerMinute` |
-| Unused parameters                            | prefix `_`                                                  | `(_request, reply) => ...`               |
+| Thing                                        | Convention                                                  | Example                                   |
+| -------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------- |
+| Variables, functions                         | `camelCase`, verbs for functions                            | `loadConfig`, `getAccessToken`            |
+| Types, interfaces, classes, React components | `PascalCase`                                                | `AuthService`, `EmployeeList`             |
+| Constants that never change                  | `UPPER_SNAKE_CASE`                                          | `DEFAULT_ADMIN_ROLES`, `EXPIRY_MARGIN_MS` |
+| Booleans                                     | read as a question                                          | `enabled`, `persistent`, `isAvailable()`  |
+| Zod schemas                                  | `<thing>Schema`, with `type Thing = z.infer<...>` beside it | `employeeSchema` and `Employee`           |
+| Interfaces for injected deps                 | `<Thing>Deps`                                               | `AppDeps`, `ApiClientDeps`                |
+| Units in names                               | include the unit                                            | `EXPIRY_MARGIN_MS`, `rateLimitPerMinute`  |
+| Unused parameters                            | prefix `_`                                                  | `(_request, reply) => ...`                |
 
 File names follow the area they live in:
 
@@ -336,6 +344,11 @@ File names follow the area they live in:
 - **Tests**: `<thing>.test.ts` or `.test.tsx`, mirroring the path of the code under test.
 
 When adding a file, copy the style of its neighbours. Do not rename existing files just to unify these.
+
+**Provider-neutral naming.** Outside the adapter, name things after the concept, not the vendor:
+"identity provider", "issuer", `subjectId`, "role", "group". The vendor name may appear only where
+`scripts/naming-allowlist.json` allows it (the adapter package, setup docs, ADRs). `pnpm check` runs
+`scripts/check-naming.mjs` and fails on any other use (ADR 0009).
 
 ### 5.3 TypeScript
 
@@ -351,7 +364,7 @@ When adding a file, copy the style of its neighbours. Do not rename existing fil
 - **Explicit return types on exported functions** that form a contract (route handlers, services,
   mappers). Let inference work for small local helpers.
 - **Narrow, do not cast.** `as` is a promise to the compiler that you cannot prove. If you must use it,
-  add a comment saying why it is safe.
+  make the reason it is safe obvious from the surrounding code, or explain it in the pull request.
 - **Immutability by default:** `const`, `readonly`, `Readonly<...>`, and create new objects instead of
   mutating arguments.
 
@@ -378,18 +391,16 @@ When adding a file, copy the style of its neighbours. Do not rename existing fil
 
 ### 5.5 Comments
 
-Code says _what_. Comments say _why_, and only where the reason is not obvious.
+This repository has **no comments in source code**: no `//`, no `/* */`, no JSDoc. The only exception is
+a comment that tools read, such as `/// <reference ... />` or an `eslint-disable` directive. Put the
+reasoning somewhere else:
 
-Good, from this repo:
+- Make the code say it: clear names, small functions, types that carry the contract.
+- Explain a decision in an ADR (`docs/adr`), a limit or a reason in the docs, and a one-off reason in
+  the commit message or pull request.
+- A test name that reads as a sentence documents behaviour better than a comment does.
 
-```ts
-// Several requests can find an expired token at once. Share one refresh: refresh
-// tokens may be single-use, so parallel refreshes would invalidate each other.
-```
-
-Bad: `// increment i`, or a comment that repeats the function name. If a comment explains confusing code,
-first try to make the code clearer. Use `/** ... */` on exported interfaces and functions whose contract
-is not obvious from the signature. Delete commented-out code; Git remembers it.
+Delete commented-out code; Git remembers it.
 
 ### 5.6 React and the renderer
 
@@ -421,18 +432,14 @@ is not obvious from the signature. Delete commented-out code; Git remembers it.
 ## 6. Error handling
 
 1. **Fail early, at the boundary.** Bad input is rejected by Zod before any rule runs (`400`).
-2. **Throw typed errors from low layers** (`KeycloakError`, `OidcError`) and **translate them in one
+2. **Throw typed errors from low layers** (`IdentityProviderError`, `OidcError`) and **translate them in one
    place** ([error-handler.ts](../apps/api/src/plugins/error-handler.ts)). Services do not know about
    HTTP status codes.
 3. **Fail safe.** Users get a short message and a request ID. Stack traces, raw validation output, tokens
    and database errors stay in the server log.
-4. **Do not swallow errors silently.** An empty `catch` needs a comment saying why ignoring is right:
-
-   ```ts
-   } catch {
-     // Keycloak unreachable: the local session is already gone.
-   }
-   ```
+4. **Do not swallow errors silently.** An empty `catch` is only for an error you have decided to ignore
+   (ESLint allows it for that reason). If it is not obvious why ignoring is right, handle the error or
+   record the reason in an ADR or the docs.
 
 5. **Tell failures apart when the response differs.** In `AuthService.doRefresh`, an OAuth error ends the
    session, a network error keeps the tokens so the next attempt can succeed.
@@ -454,7 +461,8 @@ The full list is in [security.md](security.md). The ones that affect how you wri
   (`z.uuid()`, `apiPathSchema`).
 - **Do not follow redirects with a bearer token** (`redirect: 'error'`).
 - **Set timeouts** on every outbound request (`AbortSignal.timeout`).
-- **All Keycloak Admin calls live in `packages/keycloak-client`.** Lint enforces it.
+- **All identity provider admin calls live in `packages/identity-*`, and `apps/api` reaches identity
+  only through `IdentityProvider`.** Lint enforces both.
 - **Secrets come from the environment** (`.env`, parsed and validated in `config/`). Never commit them,
   and never hard-code them in tests.
 
@@ -469,7 +477,7 @@ The conventions and folder layout are in [development.md](development.md#testing
 - **Arrange, Act, Assert.** Three visible steps, one reason for the test to fail.
 - **Name tests as sentences** that say the condition and the result:
   `it('returns 401 when the token is expired')`.
-- **Fake at the boundary.** Fake `TokenStorage`, `KeycloakClient`, `fetch` and the clock. Do not mock the
+- **Fake at the boundary.** Fake `TokenStorage`, `IdentityProvider`, `fetch` and the clock. Do not mock the
   class under test.
 - **Fakes obey the real contract** (see Liskov above).
 - **Fix a bug test-first.** Add a test that fails without the fix.
@@ -488,7 +496,7 @@ The conventions and folder layout are in [development.md](development.md#testing
 - **DRY (don't repeat yourself), applied to knowledge, not text.** The same _rule or shape_ must live in
   one place (a Zod schema, the role table). Two lines that merely look alike are fine to leave alone;
   merging them too early creates a bad abstraction that is harder to undo than the duplication.
-- **Law of Demeter.** Talk to your direct collaborators. `this.keycloak.listUsers(...)`, not
+- **Law of Demeter.** Talk to your direct collaborators. `this.identity.listUsers(...)`, not
   `this.deps.client.http.users.list(...)`.
 - **Composition over inheritance.** We inject collaborators instead of extending base classes. There is
   almost no inheritance in this repo; keep it that way.
@@ -505,7 +513,7 @@ Before asking for review:
 
 - [ ] `pnpm check` passes (lint, format, typecheck, tests, build).
 - [ ] Each new file has one clear job and sits in the right layer and folder.
-- [ ] New dependencies on outside things (database, network, clock, Keycloak) are injected through an
+- [ ] New dependencies on outside things (database, network, clock, identity provider) are injected through an
       interface, and a fake is used in tests.
 - [ ] Input is validated with a Zod schema at the boundary; shared shapes live in `packages/shared`.
 - [ ] Any new feature has an API-side role check, not only a hidden button.
@@ -513,5 +521,5 @@ Before asking for review:
 - [ ] No tokens, secrets or personal data in logs, tests or commits.
 - [ ] New behaviour has tests, including the failure path; a bug fix has a test that failed before.
 - [ ] UI changes handle loading, error and empty states and work with the keyboard.
-- [ ] Comments explain _why_. No dead code, no `console.log`, no unexplained `any` or `as`.
+- [ ] No comments in code. No dead code, no `console.log`, no unexplained `any` or `as`.
 - [ ] Docs or an ADR updated if a decision or a command changed.

@@ -1,5 +1,3 @@
-// The contract between the renderer (untrusted UI) and the main process.
-// Types only plus channel names: no runtime dependencies, so the sandboxed preload stays tiny.
 import type { AppSettings } from '@accessdesk/shared';
 
 export const IPC = {
@@ -18,7 +16,7 @@ export interface AuthStatus {
   username: string | null;
   displayName: string | null;
   roles: string[];
-  /** False when the OS secure storage is unavailable: the session then lives in memory only. */
+  adminRoles: string[];
   persistent: boolean;
 }
 
@@ -33,7 +31,6 @@ export interface ConnectionTestResult {
 export type LoginResult =
   { ok: true; status: AuthStatus } | { ok: false; message: string; cancelled: boolean };
 
-/** The renderer never sees a token: main attaches it and returns only the response body. */
 export type ApiResponse =
   { ok: true; status: number; data: unknown } | { ok: false; status: number; message: string };
 

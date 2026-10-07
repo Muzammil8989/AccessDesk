@@ -1,3 +1,4 @@
+import type { AccessPolicy } from '@accessdesk/identity';
 import type { AppSettings } from '@accessdesk/shared';
 import type { AuthStatus } from '../../shared/ipc';
 import type { TokenStorage } from '../store/tokenStore';
@@ -17,14 +18,13 @@ import { createCodeChallenge, createCodeVerifier, createState } from './pkce';
 
 export interface AuthServiceDeps {
   getSettings(): Promise<AppSettings | null>;
+  policy: AccessPolicy;
   tokenStore: TokenStorage;
-  /** Opens the system browser. Never an embedded window. */
   openExternal(url: string): Promise<void>;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
 }
 
-// Refresh a little early so a token does not expire while a request is in flight.
 const EXPIRY_MARGIN_MS = 30_000;
 
 export class AuthService {
@@ -39,25 +39,33 @@ export class AuthService {
 
   async status(): Promise<AuthStatus> {
     const persistent = this.deps.tokenStore.persistent;
+    const adminRoles = this.deps.policy.adminRoles;
     const tokens = await this.deps.tokenStore.load();
-    // An expired access token is still a live session if it can be refreshed.
     const usable = tokens && (tokens.refreshToken !== null || tokens.expiresAt > this.now());
     if (!tokens || !usable) {
-      return { authenticated: false, username: null, displayName: null, roles: [], persistent };
+      return {
+        authenticated: false,
+        username: null,
+        displayName: null,
+        roles: [],
+        adminRoles,
+        persistent,
+      };
     }
-    const claims = readDisplayClaims(tokens.accessToken);
+    const claims = readDisplayClaims(tokens.accessToken, this.deps.policy.rolesClaimPath);
     return {
       authenticated: true,
-      username: claims.preferred_username ?? null,
+      username: claims.username ?? null,
       displayName: claims.name ?? null,
-      roles: claims.realm_access?.roles ?? [],
+      roles: claims.roles,
+      adminRoles,
       persistent,
     };
   }
 
   async login(): Promise<AuthStatus> {
     const settings = await this.deps.getSettings();
-    if (!settings) throw new Error('Set up the Keycloak connection first');
+    if (!settings) throw new Error('Set up the identity provider connection first');
 
     this.pendingLogin?.cancel();
     const endpoints = await discover(settings, this.deps.fetch);
@@ -90,7 +98,7 @@ export class AuthService {
       return await this.status();
     } finally {
       if (this.pendingLogin === loopback) this.pendingLogin = null;
-      loopback.cancel(); // No-op when the login already finished; frees the port otherwise.
+      loopback.cancel();
     }
   }
 
@@ -112,20 +120,16 @@ export class AuthService {
           refreshToken: tokens.refreshToken,
           fetchFn: this.deps.fetch,
         });
-      } catch {
-        // Keycloak unreachable: the local session is already gone.
-      }
+      } catch {}
     }
     return this.status();
   }
 
-  /** Drops the local session without contacting Keycloak (used when settings change). */
   async clearSession(): Promise<void> {
     this.cancelLogin();
     await this.deps.tokenStore.clear();
   }
 
-  /** A valid access token, refreshed when needed, or null when the user must sign in again. */
   async getAccessToken(): Promise<string | null> {
     const tokens = await this.deps.tokenStore.load();
     if (!tokens) return null;
@@ -133,13 +137,10 @@ export class AuthService {
     return (await this.refresh())?.accessToken ?? null;
   }
 
-  /** Used after the API answers 401 although the token looked valid locally. */
   async forceRefresh(): Promise<string | null> {
     return (await this.refresh())?.accessToken ?? null;
   }
 
-  // Several requests can find an expired token at once. Share one refresh: refresh
-  // tokens may be single-use, so parallel refreshes would invalidate each other.
   private refresh(): Promise<TokenSet | null> {
     this.refreshInFlight ??= this.doRefresh().finally(() => {
       this.refreshInFlight = null;
@@ -163,13 +164,10 @@ export class AuthService {
         fetchFn: this.deps.fetch,
         now: this.now(),
       });
-      // Keycloak may omit a new refresh token. Keep the old one then.
       const merged = { ...next, refreshToken: next.refreshToken ?? tokens.refreshToken };
       await this.deps.tokenStore.save(merged);
       return merged;
     } catch (error) {
-      // An OAuth error (e.g. invalid_grant) means the session ended: sign the user out.
-      // A network error leaves the tokens in place so the next attempt can succeed.
       if (error instanceof OidcError && error.code) {
         await this.deps.tokenStore.clear();
         return null;

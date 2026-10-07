@@ -1,16 +1,15 @@
+import type { IdentityUser } from '@accessdesk/identity';
 import type { Employee } from '@accessdesk/shared';
-import type { KeycloakUser } from '@accessdesk/keycloak-client';
 
-/** Keycloak's user representation to the view AccessDesk shows. Nothing is stored. */
-export function toEmployee(user: KeycloakUser): Employee {
+export function toEmployee(user: IdentityUser): Employee {
   return {
-    id: user.id,
+    id: user.subjectId,
     username: user.username,
-    email: user.email ?? null,
-    firstName: user.firstName ?? null,
-    lastName: user.lastName ?? null,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
     enabled: user.enabled,
     emailVerified: user.emailVerified,
-    createdAt: user.createdTimestamp ? new Date(user.createdTimestamp).toISOString() : null,
+    createdAt: user.createdAt?.toISOString() ?? null,
   };
 }

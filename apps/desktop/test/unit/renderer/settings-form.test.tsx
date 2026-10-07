@@ -9,8 +9,10 @@ describe('connection settings form', () => {
     installFakeApi();
     renderWithProviders(<SettingsForm initial={settings} submitLabel="Save" />);
 
-    expect(screen.getByLabelText('Keycloak URL')).toHaveValue('http://localhost:8080');
-    expect(screen.getByLabelText('Realm')).toHaveValue('company-platform');
+    expect(screen.getByLabelText('Issuer URL')).toHaveValue(
+      'http://localhost:8080/realms/company-platform',
+    );
+    expect(screen.queryByLabelText('Realm')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Client ID')).toHaveValue('accessdesk');
   });
 
@@ -26,7 +28,7 @@ describe('connection settings form', () => {
     const api = installFakeApi();
     renderWithProviders(<SettingsForm initial={settings} submitLabel="Save" />);
 
-    const url = screen.getByLabelText('Keycloak URL');
+    const url = screen.getByLabelText('Issuer URL');
     await userEvent.clear(url);
     await userEvent.type(url, 'not-a-url');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -36,16 +38,16 @@ describe('connection settings form', () => {
     expect(api.settings.save).not.toHaveBeenCalled();
   });
 
-  it('rejects a realm that could change a URL path', async () => {
+  it('rejects an issuer URL that carries a query', async () => {
     const api = installFakeApi();
     renderWithProviders(<SettingsForm initial={settings} submitLabel="Save" />);
 
-    const realm = screen.getByLabelText('Realm');
-    await userEvent.clear(realm);
-    await userEvent.type(realm, '../master');
+    const issuer = screen.getByLabelText('Issuer URL');
+    await userEvent.clear(issuer);
+    await userEvent.type(issuer, 'https://sso.example.com/realms/x?next=//evil.test');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(realm).toHaveAttribute('aria-invalid', 'true'));
+    await waitFor(() => expect(issuer).toHaveAttribute('aria-invalid', 'true'));
     expect(api.settings.save).not.toHaveBeenCalled();
   });
 
@@ -54,14 +56,14 @@ describe('connection settings form', () => {
     const onSaved = vi.fn();
     renderWithProviders(<SettingsForm initial={settings} submitLabel="Save" onSaved={onSaved} />);
 
-    const url = screen.getByLabelText('Keycloak URL');
+    const url = screen.getByLabelText('Issuer URL');
     await userEvent.clear(url);
     await userEvent.type(url, 'https://sso.example.com/');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(api.settings.save).toHaveBeenCalledWith(
-      expect.objectContaining({ keycloakUrl: 'https://sso.example.com' }),
+      expect.objectContaining({ issuerUrl: 'https://sso.example.com' }),
     );
   });
 
@@ -75,18 +77,20 @@ describe('connection settings form', () => {
 
   it('reports a successful and a failed connection test', async () => {
     const results = [
-      { ok: true, message: 'Connected to realm "company-platform"' },
-      { ok: false, message: 'Could not reach Keycloak at http://localhost:8080' },
+      { ok: true, message: 'Connected to the identity provider at http://localhost:8080' },
+      { ok: false, message: 'Could not reach the identity provider at http://localhost:8080' },
     ];
     installFakeApi({ testConnection: async () => results.shift()! });
     renderWithProviders(<SettingsForm initial={settings} submitLabel="Save" />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Test connection' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Connected to realm');
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Connected to the identity provider',
+    );
 
     await userEvent.click(screen.getByRole('button', { name: 'Test connection' }));
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent('Could not reach Keycloak'),
+      expect(screen.getByRole('status')).toHaveTextContent('Could not reach the identity provider'),
     );
   });
 });

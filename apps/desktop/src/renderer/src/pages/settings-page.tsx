@@ -1,4 +1,3 @@
-import { ADMIN_ROLES } from '@accessdesk/shared';
 import { useQuery } from '@tanstack/react-query';
 import { SettingsForm } from '@/components/settings-form';
 import { Badge } from '@/components/ui/badge';
@@ -8,10 +7,9 @@ import { authQuery, settingsQuery } from '@/lib/session';
 export function SettingsPage() {
   const settings = useQuery(settingsQuery);
   const auth = useQuery(authQuery);
-  // Keycloak adds default roles (offline_access and so on). They are shown, but only the two
-  // admin roles matter, so those are highlighted.
   const roles = [...(auth.data?.roles ?? [])].sort();
-  const isAdminRole = (role: string) => (ADMIN_ROLES as readonly string[]).includes(role);
+  const adminRoles = auth.data?.adminRoles ?? [];
+  const isAdminRole = (role: string) => adminRoles.includes(role);
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
@@ -19,10 +17,8 @@ export function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Keycloak connection</CardTitle>
-          <CardDescription>
-            Changing the Keycloak URL, realm or client signs you out.
-          </CardDescription>
+          <CardTitle>Identity provider connection</CardTitle>
+          <CardDescription>Changing the issuer URL or the client signs you out.</CardDescription>
         </CardHeader>
         <CardContent>
           {settings.data && <SettingsForm initial={settings.data} submitLabel="Save settings" />}
@@ -40,7 +36,7 @@ export function SettingsPage() {
             {auth.data?.displayName ?? auth.data?.username}
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground">Realm roles in your token: </span>
+            <span className="text-muted-foreground">Roles in your token: </span>
             {roles.length === 0 && <span className="text-muted-foreground">none</span>}
             {roles.map((role) => (
               <Badge key={role} variant={isAdminRole(role) ? 'success' : 'secondary'}>
