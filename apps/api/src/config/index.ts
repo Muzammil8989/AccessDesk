@@ -28,6 +28,7 @@ export interface Config {
   issuer: string;
   audience: string;
   adminRoles: string[];
+  superAdminRole: string;
   rolesClaimPath: string;
   databaseUrl: string;
   port: number;
@@ -49,6 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     issuer: e.IDENTITY_ISSUER_URL.replace(/\/+$/, ''),
     audience: e.IDENTITY_AUDIENCE ?? e.IDENTITY_CLIENT_ID,
     adminRoles: e.AUTH_ADMIN_ROLES,
+    superAdminRole: e.AUTH_SUPER_ADMIN_ROLE,
     rolesClaimPath: e.AUTH_ROLES_CLAIM_PATH,
     databaseUrl: e.DATABASE_URL,
     port: e.API_PORT,

@@ -2,10 +2,12 @@ import { hasAdminAccess } from '@accessdesk/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LogOut, ShieldAlert } from 'lucide-react';
 import { Link, Navigate } from 'react-router';
+import { CenteredCardSkeleton } from '@/components/skeletons';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { authQuery, settingsQuery } from '@/lib/session';
+import { toast } from '@/lib/toast';
 
 export function NoAccessPage() {
   const queryClient = useQueryClient();
@@ -14,9 +16,10 @@ export function NoAccessPage() {
   const signOut = useMutation({
     mutationFn: () => window.accessdesk.auth.logout(),
     onSuccess: () => queryClient.invalidateQueries(),
+    onError: () => toast.error('Could not sign out. Try again.'),
   });
 
-  if (settings.isPending || auth.isPending) return null;
+  if (settings.isPending || auth.isPending) return <CenteredCardSkeleton />;
   if (!settings.data) return <Navigate to="/setup" replace />;
   if (!auth.data?.authenticated) return <Navigate to="/login" replace />;
   if (hasAdminAccess(auth.data.roles, auth.data.adminRoles))
@@ -32,7 +35,9 @@ export function NoAccessPage() {
           <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-destructive/15 text-destructive">
             <ShieldAlert className="size-5" aria-hidden="true" />
           </div>
-          <CardTitle className="text-xl">You don't have access to AccessDesk</CardTitle>
+          <CardTitle as="h1" className="text-xl">
+            You don't have access to AccessDesk
+          </CardTitle>
           <CardDescription>
             You are signed in as <strong>{user.displayName ?? user.username}</strong>, but this
             account has no AccessDesk role. Ask an administrator of your identity provider to give

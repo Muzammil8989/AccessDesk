@@ -8,7 +8,8 @@ src/employee.ts   employee view, list query, pagination limits
 src/template.ts   onboarding template and items
 src/settings.ts   local desktop settings: issuer URL, client ID, API URL (public values only)
 src/error.ts      API error shape
-src/permissions.ts  which features need an admin role (the admin roles themselves are configuration)
+src/onboarding.ts   onboarding input, options and result schemas, and the assignable-role policy
+src/permissions.ts  which features need an admin or the super-admin role (the role names are configuration)
 test/unit/        schema tests
 ```
 

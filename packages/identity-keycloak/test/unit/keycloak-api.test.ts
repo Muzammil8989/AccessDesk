@@ -54,6 +54,119 @@ describe('Keycloak Admin API calls', () => {
     });
   });
 
+  it('creates a user with a verified email and a temporary password credential', async () => {
+    const { provider, fetchMock } = setup(
+      new Response(null, {
+        status: 201,
+        headers: { Location: `http://idp.test/admin/realms/r/users/${SUBJECT_ID}` },
+      }),
+    );
+    await provider.createUser({
+      username: 'ann',
+      email: 'ann@example.com',
+      firstName: 'Ann',
+      lastName: 'Lee',
+      emailVerified: true,
+      initialPassword: { value: 'Temp-pass-123', temporary: true },
+    });
+
+    expect(JSON.parse(call(fetchMock).init.body as string)).toEqual({
+      enabled: true,
+      username: 'ann',
+      email: 'ann@example.com',
+      firstName: 'Ann',
+      lastName: 'Lee',
+      emailVerified: true,
+      credentials: [{ type: 'password', value: 'Temp-pass-123', temporary: true }],
+    });
+  });
+
+  it('sends a non-temporary password as a permanent credential', async () => {
+    const { provider, fetchMock } = setup(
+      new Response(null, {
+        status: 201,
+        headers: { Location: `http://idp.test/admin/realms/r/users/${SUBJECT_ID}` },
+      }),
+    );
+    await provider.createUser({
+      username: 'ann',
+      initialPassword: { value: 'Perm-pass-123', temporary: false },
+    });
+
+    expect(JSON.parse(call(fetchMock).init.body as string).credentials).toEqual([
+      { type: 'password', value: 'Perm-pass-123', temporary: false },
+    ]);
+  });
+
+  it('looks users up by exact username', async () => {
+    const { provider, fetchMock } = setup(jsonResponse([{ id: SUBJECT_ID, username: 'ann' }]));
+
+    const found = await provider.findUsers({ username: 'ann', exact: true });
+
+    expect(call(fetchMock).url).toBe(`${ADMIN}/users?username=ann&exact=true`);
+    expect(found.map((user) => user.subjectId)).toEqual([SUBJECT_ID]);
+  });
+
+  it('looks users up by exact email with the value encoded', async () => {
+    const { provider, fetchMock } = setup(jsonResponse([]));
+
+    await provider.findUsers({ email: 'a+b@example.com', exact: true });
+
+    expect(call(fetchMock).url).toBe(`${ADMIN}/users?email=a%2Bb%40example.com&exact=true`);
+  });
+
+  it('refuses an exact lookup that names neither a username nor an email', async () => {
+    const { provider, fetchMock } = setup();
+
+    await expect(provider.findUsers({ exact: true })).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('lists the top-level groups in the brief form', async () => {
+    const { provider, fetchMock } = setup(
+      jsonResponse([{ id: 'g1', name: 'Engineering', path: '/Engineering' }]),
+    );
+
+    const groups = await provider.listGroups();
+
+    expect(call(fetchMock).url).toBe(`${ADMIN}/groups?briefRepresentation=true&first=0&max=100`);
+    expect(groups).toEqual([{ id: 'g1', name: 'Engineering', path: '/Engineering' }]);
+  });
+
+  it('pages through the groups until a short page arrives', async () => {
+    const page = (from: number, count: number) =>
+      jsonResponse(
+        Array.from({ length: count }, (_, i) => ({
+          id: `g${from + i}`,
+          name: `Group ${from + i}`,
+          path: `/Group ${from + i}`,
+        })),
+      );
+    const { provider, fetchMock } = setup(page(0, 100), page(100, 3));
+
+    const groups = await provider.listGroups();
+
+    expect(groups).toHaveLength(103);
+    expect(call(fetchMock, 1).url).toBe(
+      `${ADMIN}/groups?briefRepresentation=true&first=100&max=100`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops paging groups at a fixed ceiling', async () => {
+    const fullPage = () =>
+      jsonResponse(
+        Array.from({ length: 100 }, (_, i) => ({ id: `g${i}`, name: `G${i}`, path: `/G${i}` })),
+      );
+    const pages = Array.from({ length: 60 }, fullPage);
+    const { provider, fetchMock } = setup(...pages);
+
+    const groups = await provider.listGroups();
+
+    expect(fetchMock).toHaveBeenCalledTimes(50);
+    expect(groups).toHaveLength(5000);
+  });
+
   it('disables a user with a partial update', async () => {
     const { provider, fetchMock } = setup(new Response(null, { status: 204 }));
     await provider.disableUser(SUBJECT_ID);

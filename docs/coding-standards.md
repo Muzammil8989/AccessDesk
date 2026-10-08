@@ -411,6 +411,12 @@ Delete commented-out code; Git remembers it.
   `lib/session.ts`.
 - **Validate every API response** against the shared Zod schema before using it.
 - **Handle all four states**: loading (skeletons), error, empty and success.
+- **Style with the design tokens** in `styles.css` (`bg-primary`, `text-muted-foreground`), never raw
+  colours, so light and dark both work. The rules are in `design-system/accessdesk/MASTER.md`.
+- **Tell the user about the result of an action** with a toast (`lib/toast.ts`) or an inline `Alert`.
+  An error must not disappear on its own.
+- **Secrets shown once** (like the temporary password) stay in component state, never in
+  `localStorage`, the query cache, a log or a URL.
 - **Accessibility is part of "done":** real `button` and `label` elements, keyboard operation, visible
   focus. `jsx-a11y` runs in lint.
 - Extract a custom hook when logic is reused or hides a lifecycle (`use-debounced-value.ts`).

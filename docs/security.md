@@ -11,7 +11,10 @@ These are enforced in code and covered by tests where possible. Report vulnerabi
 3. **Electron hardening:** `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. A strict
    Content Security Policy (production: scripts and styles from `self` only, no network access from the
    page). Navigation is limited to the app's own origin, new windows are denied, webviews are blocked,
-   and all permission requests are refused. The preload exposes a small typed API, and IPC handlers
+   and every permission request is refused except one: writing text to the clipboard (Chromium's
+   `clipboard-sanitized-write`), from the app's own top-level page only, so that "Copy" works on the
+   one-time password. Reading the clipboard, location, notifications and the rest stay denied. The
+   preload exposes a small typed API, and IPC handlers
    accept calls from the app's own top-level page only. In production the UI is served from a custom
    `app://` scheme so that the CSP and origin checks apply.
 4. **Tokens are stored with Electron `safeStorage`** (Windows DPAPI, macOS Keychain, Linux libsecret),
@@ -38,20 +41,23 @@ These are enforced in code and covered by tests where possible. Report vulnerabi
 | Encrypted tokens      | `apps/desktop/src/main/store/tokenStore.ts`                  | `apps/desktop/test/unit/main/store/store.test.ts`                    |
 | JWT check, role guard | `apps/api/src/plugins/auth.ts`                               | `apps/api/test/integration/auth.test.ts`                             |
 | Forwarded admin token | `apps/api/src/modules/employees/employees.routes.ts`         | `apps/api/test/integration/employees.test.ts`                        |
+| One-time password     | `apps/api/src/modules/onboarding/` (ADR 0010)                | `apps/api/test/integration/onboarding.test.ts`                       |
 | Input validation      | `packages/shared/src/`                                       | `packages/shared/test/unit/`                                         |
 
 ## Role-based visibility
 
 The desktop app shows each user only what their role allows. `packages/shared/src/permissions.ts` says
 which roles may use which feature (`canAccess`, `hasAdminAccess`). The desktop main process reads
-`AUTH_ADMIN_ROLES` and `AUTH_ROLES_CLAIM_PATH` from the same `.env` as the API, with the same validation
-code, so the UI and the API cannot disagree about who is an admin. The sidebar hides entries the
+`AUTH_ADMIN_ROLES`, `AUTH_SUPER_ADMIN_ROLE` and `AUTH_ROLES_CLAIM_PATH` from the same `.env` as the
+API, with the same validation code, so the UI and the API cannot disagree about who is an admin. The sidebar hides entries the
 user cannot use, each screen is guarded against direct navigation, and a signed-in user with no AccessDesk
 role sees only a "no access" page with no menu and no data requests.
 
 This is a convenience, not a security boundary: the renderer reads roles from the token for display only.
 The API checks the real token on every request. If you restrict a feature to one role in
-`permissions.ts`, make the API enforce the same rule for the matching routes.
+`permissions.ts`, make the API enforce the same rule for the matching routes. Today the one case is
+assigning the `admin` role during onboarding: the UI disables the option, and the API refuses it unless
+the caller has the super-admin role (ADR 0010).
 
 ## API hardening
 

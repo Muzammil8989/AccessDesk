@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Navigate } from 'react-router';
+import { BrandMark } from '@/components/brand';
+import { CenteredCardSkeleton } from '@/components/skeletons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { authQuery, settingsQuery } from '@/lib/session';
@@ -16,7 +18,7 @@ export function LoginPage() {
     },
   });
 
-  if (settings.isPending || auth.isPending) return null;
+  if (settings.isPending || auth.isPending) return <CenteredCardSkeleton />;
   if (!settings.data) return <Navigate to="/setup" replace />;
   if (auth.data?.authenticated) return <Navigate to="/employees" replace />;
 
@@ -26,7 +28,10 @@ export function LoginPage() {
     <div className="grid min-h-screen place-items-center p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-xl">Sign in to AccessDesk</CardTitle>
+          <BrandMark className="mb-2 size-10" />
+          <CardTitle as="h1" className="text-xl">
+            Sign in to AccessDesk
+          </CardTitle>
           <CardDescription>
             You will sign in with your company account in your web browser.
           </CardDescription>

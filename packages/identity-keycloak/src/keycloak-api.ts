@@ -33,12 +33,19 @@ export interface ListUsersQuery {
   max?: number;
 }
 
+export interface FindUsersQuery {
+  username?: string;
+  email?: string;
+}
+
 export interface NewUser {
   username: string;
   email?: string;
   firstName?: string;
   lastName?: string;
   enabled?: boolean;
+  emailVerified?: boolean;
+  initialPassword?: { value: string; temporary: boolean };
 }
 
 export interface AdminApiOptions {
@@ -50,10 +57,12 @@ export interface AdminApiOptions {
 export interface AdminApi {
   listUsers(query: ListUsersQuery): Promise<RawUser[]>;
   countUsers(query: { search?: string }): Promise<number>;
+  findUsersExact(query: FindUsersQuery): Promise<RawUser[]>;
   getUser(subjectId: string): Promise<RawUser>;
   createUser(input: NewUser): Promise<string>;
   disableUser(subjectId: string): Promise<void>;
   endAllSessions(subjectId: string): Promise<void>;
+  listGroups(): Promise<RawGroup[]>;
   getUserGroups(subjectId: string): Promise<RawGroup[]>;
   addUserToGroup(subjectId: string, groupId: string): Promise<void>;
   removeUserFromGroup(subjectId: string, groupId: string): Promise<void>;
@@ -63,6 +72,9 @@ export interface AdminApi {
 }
 
 const enc = encodeURIComponent;
+
+const GROUP_PAGE_SIZE = 100;
+const MAX_GROUP_PAGES = 50;
 
 export function parseIssuerUrl(issuerUrl: string): { baseUrl: string; realm: string } {
   const example = 'for example https://sso.example.com/realms/company';
@@ -140,12 +152,27 @@ export function createAdminApi(options: AdminApiOptions): AdminApi {
       return json(res, z.number());
     },
 
+    async findUsersExact(query) {
+      if (query.username === undefined && query.email === undefined) {
+        throw new IdentityProviderError(400, 'An exact user lookup needs a username or an email');
+      }
+      const res = await request('GET', '/users', {
+        query: { username: query.username, email: query.email, exact: 'true' },
+      });
+      return json(res, z.array(userSchema));
+    },
+
     async getUser(subjectId) {
       return json(await request('GET', `/users/${enc(subjectId)}`), userSchema);
     },
 
-    async createUser(input) {
-      const res = await request('POST', '/users', { body: { enabled: true, ...input } });
+    async createUser({ initialPassword, ...input }) {
+      const credentials = initialPassword
+        ? [{ type: 'password', value: initialPassword.value, temporary: initialPassword.temporary }]
+        : undefined;
+      const res = await request('POST', '/users', {
+        body: { enabled: true, ...input, ...(credentials && { credentials }) },
+      });
       const subjectId = res.headers.get('Location')?.split('/').pop();
       if (!subjectId) {
         throw new IdentityProviderError(
@@ -162,6 +189,23 @@ export function createAdminApi(options: AdminApiOptions): AdminApi {
 
     async endAllSessions(subjectId) {
       await request('POST', `/users/${enc(subjectId)}/logout`);
+    },
+
+    async listGroups() {
+      const groups: RawGroup[] = [];
+      for (let page = 0; page < MAX_GROUP_PAGES; page += 1) {
+        const res = await request('GET', '/groups', {
+          query: {
+            briefRepresentation: 'true',
+            first: page * GROUP_PAGE_SIZE,
+            max: GROUP_PAGE_SIZE,
+          },
+        });
+        const batch = await json(res, z.array(groupSchema));
+        groups.push(...batch);
+        if (batch.length < GROUP_PAGE_SIZE) break;
+      }
+      return groups;
     },
 
     async getUserGroups(subjectId) {

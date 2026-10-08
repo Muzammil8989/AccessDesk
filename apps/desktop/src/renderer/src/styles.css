@@ -1,52 +1,81 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+/* Dark mode is class-based: lib/theme.ts toggles `.dark` on <html> (Light / Dark / System). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens. Minimalism / Swiss: neutral slate surfaces, one blue brand hue.
+ * Text/background pairs are chosen for >= 4.5:1; input borders for >= 3:1 (WCAG 1.4.11).
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  color-scheme: light;
+
+  --background: oklch(0.984 0.003 248);
+  --foreground: oklch(0.208 0.042 265);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.45 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.55 0.22 27);
-  --success: oklch(0.45 0.12 150);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --radius: 0.625rem;
+  --card-foreground: oklch(0.208 0.042 265);
+  --primary: oklch(0.546 0.215 263);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.96 0.008 250);
+  --secondary-foreground: oklch(0.26 0.04 265);
+  --muted: oklch(0.968 0.007 248);
+  --muted-foreground: oklch(0.446 0.037 257);
+  --accent: oklch(0.95 0.025 262);
+  --accent-foreground: oklch(0.3 0.09 265);
+  --destructive: oklch(0.53 0.22 27);
+  --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.47 0.11 165);
+  --warning: oklch(0.5 0.12 65);
+  --info: oklch(0.48 0.2 263);
+  --border: oklch(0.929 0.013 256);
+  --input: oklch(0.64 0.03 256);
+  --ring: oklch(0.546 0.215 263);
+  --sidebar: oklch(0.99 0.003 248);
+  --sidebar-foreground: oklch(0.208 0.042 265);
+  --sidebar-border: oklch(0.929 0.013 256);
+  --sidebar-accent: oklch(0.95 0.025 262);
+  --sidebar-accent-foreground: oklch(0.3 0.09 265);
+  --radius: 0.5rem;
+
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 250ms;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22);
-    --success: oklch(0.75 0.15 150);
-    --border: oklch(1 0 0 / 12%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --sidebar: oklch(0.18 0 0);
-  }
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(0.16 0.02 265);
+  --foreground: oklch(0.97 0.005 250);
+  --card: oklch(0.2 0.025 265);
+  --card-foreground: oklch(0.97 0.005 250);
+  --primary: oklch(0.72 0.14 258);
+  --primary-foreground: oklch(0.17 0.04 265);
+  --secondary: oklch(0.27 0.03 265);
+  --secondary-foreground: oklch(0.97 0.005 250);
+  --muted: oklch(0.25 0.025 265);
+  --muted-foreground: oklch(0.72 0.03 258);
+  --accent: oklch(0.3 0.05 262);
+  --accent-foreground: oklch(0.97 0.005 250);
+  --destructive: oklch(0.78 0.15 22);
+  --destructive-foreground: oklch(0.16 0.03 25);
+  --success: oklch(0.8 0.15 160);
+  --warning: oklch(0.84 0.14 85);
+  --info: oklch(0.78 0.12 250);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(0.55 0.03 262);
+  --ring: oklch(0.72 0.14 258);
+  --sidebar: oklch(0.185 0.025 265);
+  --sidebar-foreground: oklch(0.97 0.005 250);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-accent: oklch(0.3 0.05 262);
+  --sidebar-accent-foreground: oklch(0.97 0.005 250);
 }
 
 @theme inline {
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -60,14 +89,30 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@theme {
+  --shadow-xs: 0 1px 2px 0 oklch(0.2 0.04 265 / 0.05);
+  --shadow-sm: 0 1px 2px 0 oklch(0.2 0.04 265 / 0.06), 0 1px 3px 0 oklch(0.2 0.04 265 / 0.08);
+  --shadow-md: 0 2px 4px -1px oklch(0.2 0.04 265 / 0.06), 0 6px 12px -2px oklch(0.2 0.04 265 / 0.1);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
 
 @layer base {
@@ -75,12 +120,26 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground antialiased;
-    font-family:
-      system-ui,
-      -apple-system,
-      'Segoe UI',
-      Roboto,
-      sans-serif;
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  /*
+   * A solid, visible default focus ring for anything without its own (plain links, <summary>).
+   * It sits in the base layer, so a component's own `outline-none` + ring still wins.
+   */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Motion conveys state change only; honour the OS "reduce motion" setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

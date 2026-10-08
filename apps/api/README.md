@@ -11,7 +11,7 @@ discovery), requires one of the configured admin roles (default `super-admin` or
 src/config/     environment parsing and validation (Zod)
 src/infra/      real implementations: database client (Prisma + pg adapter), the `IdentityProviderFactory` type and the adapter choice,
                 job queue stub (pg-boss)
-src/modules/    one folder per feature (employees, health, templates), each with its own layers
+src/modules/    one folder per feature (audit, employees, health, onboarding, templates), each with its own layers
 src/plugins/    auth (JWT + role guard) and the error handler
 prisma/         schema.prisma, migrations, seed
 test/           unit/, integration/ (HTTP tests with app.inject()), helpers/
@@ -26,7 +26,11 @@ test/           unit/, integration/ (HTTP tests with app.inject()), helpers/
 | `pnpm --filter @accessdesk/api db:seed`    | Seed the Developer, Sales, HR templates |
 
 Routes: `GET /health` and `GET /ready` (public probes), `GET /templates`, `GET /employees`,
-`GET /employees/:id`.
+`GET /employees/:id`, and the onboarding routes `GET /onboarding/options`, `POST /onboarding` and
+`POST /onboarding/:subjectId/retry` ([ADR 0010](../../docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md)).
+The onboarding routes are limited to 20 requests a minute per IP and are sent with
+`Cache-Control: no-store`. `POST /onboarding` answers `201`, or `207` when a step after creating the
+user failed. Only the role named by `AUTH_SUPER_ADMIN_ROLE` may assign the `admin` role.
 
 Each module has its own layers (routes, service, repository or client). `server.ts` is the only place
 that chooses real implementations, and tests pass fakes through the same `AppDeps`. See

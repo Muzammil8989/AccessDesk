@@ -61,6 +61,16 @@ describe('loadConfig', () => {
       const config = loadConfig(valid);
       expect(config.adminRoles).toEqual(['super-admin', 'hr-admin']);
       expect(config.rolesClaimPath).toBe('realm_access.roles');
+      expect(config.superAdminRole).toBe('super-admin');
+    });
+
+    it('reads a custom super-admin role and rejects a blank one', () => {
+      expect(loadConfig({ ...valid, AUTH_SUPER_ADMIN_ROLE: ' it-owner ' }).superAdminRole).toBe(
+        'it-owner',
+      );
+      expect(() => loadConfig({ ...valid, AUTH_SUPER_ADMIN_ROLE: '  ' })).toThrow(
+        'AUTH_SUPER_ADMIN_ROLE',
+      );
     });
 
     it('reads custom values', () => {

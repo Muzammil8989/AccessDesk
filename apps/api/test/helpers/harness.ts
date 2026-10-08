@@ -13,7 +13,9 @@ import { vi } from 'vitest';
 import { buildApp } from '../../src/app';
 import type { Config } from '../../src/config';
 import { createIdentityProviderFactory } from '../../src/infra/identity';
+import type { AuditRepository } from '../../src/modules/audit/audit.repository';
 import type { TemplateRepository } from '../../src/modules/templates/templates.repository';
+import { InMemoryAuditRepository } from './in-memory-audit';
 
 export const ISSUER = 'http://idp.test/realms/company-platform';
 export const AUDIENCE = 'accessdesk';
@@ -24,6 +26,7 @@ export const testConfig: Config = {
   issuer: ISSUER,
   audience: AUDIENCE,
   adminRoles: ['super-admin', 'hr-admin'],
+  superAdminRole: 'super-admin',
   rolesClaimPath: 'realm_access.roles',
   databaseUrl: 'postgresql://unused',
   port: 0,
@@ -35,6 +38,7 @@ export const testConfig: Config = {
 
 export interface TokenOptions {
   roles?: string[];
+  subject?: string;
   claims?: Record<string, unknown>;
   issuer?: string;
   audience?: string;
@@ -65,7 +69,7 @@ export async function createAuthHarness(): Promise<AuthHarness> {
     makeToken: (options = {}) =>
       new SignJWT(options.claims ?? { realm_access: { roles: options.roles ?? ['hr-admin'] } })
         .setProtectedHeader({ alg: 'RS256', kid: 'test' })
-        .setSubject('admin-1')
+        .setSubject(options.subject ?? 'admin-1')
         .setIssuer(options.issuer ?? ISSUER)
         .setAudience(options.audience ?? AUDIENCE)
         .setIssuedAt()
@@ -103,9 +107,13 @@ export interface TestAppOptions {
   identity?: Partial<IdentityProvider>;
   fetch?: typeof fetch;
   templates?: TemplateRepository;
+  audit?: AuditRepository;
   checkDatabase?: () => Promise<void>;
   config?: Partial<Config>;
   discoverKeys?: boolean;
+  clock?: () => Date;
+  generatePassword?: () => string;
+  logStream?: NodeJS.WritableStream;
 }
 
 export function buildTestApp(harness: AuthHarness, options: TestAppOptions = {}) {
@@ -113,6 +121,10 @@ export function buildTestApp(harness: AuthHarness, options: TestAppOptions = {})
   return buildApp({
     config,
     templates: options.templates ?? fakeTemplateRepository(),
+    audit: options.audit ?? new InMemoryAuditRepository(),
+    clock: options.clock,
+    generatePassword: options.generatePassword,
+    logStream: options.logStream,
     identityFor: options.identity
       ? () => options.identity as IdentityProvider
       : createIdentityProviderFactory(config, options.fetch),

@@ -9,6 +9,8 @@ export const IPC = {
   authCancel: 'auth:cancel',
   authLogout: 'auth:logout',
   apiGet: 'api:get',
+  apiOnboardingCreate: 'api:onboarding-create',
+  apiOnboardingRetry: 'api:onboarding-retry',
 } as const;
 
 export interface AuthStatus {
@@ -17,6 +19,7 @@ export interface AuthStatus {
   displayName: string | null;
   roles: string[];
   adminRoles: string[];
+  superAdminRole: string;
   persistent: boolean;
 }
 
@@ -32,7 +35,8 @@ export type LoginResult =
   { ok: true; status: AuthStatus } | { ok: false; message: string; cancelled: boolean };
 
 export type ApiResponse =
-  { ok: true; status: number; data: unknown } | { ok: false; status: number; message: string };
+  | { ok: true; status: number; data: unknown }
+  | { ok: false; status: number; message: string; code?: string };
 
 export type ApiQuery = Record<string, string | number>;
 
@@ -50,5 +54,9 @@ export interface AccessDeskApi {
   };
   api: {
     get(path: string, query?: ApiQuery): Promise<ApiResponse>;
+    onboarding: {
+      create(input: unknown): Promise<ApiResponse>;
+      retry(subjectId: string, input: unknown): Promise<ApiResponse>;
+    };
   };
 }

@@ -11,9 +11,11 @@ const identity = createKeycloakIdentityProvider({
 const users = await identity.listUsers({ search: 'ann', first: 0, max: 20 });
 ```
 
-Operations: `listUsers`, `countUsers`, `getUser`, `createUser`, `disableUser`, `endAllSessions`,
-`getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `getUserRoles`, `addUserRoles`,
-`removeUserRoles`. Failures throw `IdentityProviderError` (with the HTTP status, never the token).
+Operations: `listUsers`, `countUsers`, `findUsers` (exact username or email), `getUser`, `createUser`
+(optionally with `emailVerified` and a temporary `initialPassword`), `disableUser`, `endAllSessions`,
+`listGroups`, `getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `getUserRoles`,
+`addUserRoles`, `removeUserRoles`. Failures throw `IdentityProviderError` (with the HTTP status, never
+the token).
 
 **What is specific to this provider, and only in `src/keycloak-api.ts`:**
 

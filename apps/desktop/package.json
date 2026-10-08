@@ -12,11 +12,12 @@
     "typecheck": "tsc --noEmit --composite false -p tsconfig.node.json && tsc --noEmit --composite false -p tsconfig.web.json",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "node test/e2e/smoke.mjs"
+    "test:e2e": "pnpm --filter @accessdesk/api build && electron-vite build && node test/e2e/run.mjs"
   },
   "devDependencies": {
     "@accessdesk/identity": "workspace:*",
     "@accessdesk/shared": "workspace:*",
+    "@fontsource-variable/inter": "^5.3.0",
     "@hookform/resolvers": "5.9.1",
     "@playwright/test": "1.63.0",
     "@radix-ui/react-label": "2.1.16",

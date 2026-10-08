@@ -11,6 +11,7 @@ interface StoredUser {
   createdTimestamp: number;
   groupIds: Set<string>;
   roleNames: Set<string>;
+  credentials?: unknown;
 }
 
 interface StoredGroup {
@@ -43,7 +44,8 @@ export function createFakeAdminServer() {
     new Response(null, { status, headers });
   const notFound = (what: string) => json({ errorMessage: `${what} not found` }, 404);
 
-  const representation = ({ groupIds: _g, roleNames: _r, ...user }: StoredUser) => user;
+  const representation = ({ groupIds: _g, roleNames: _r, credentials: _c, ...user }: StoredUser) =>
+    user;
 
   const matches = (user: StoredUser, search: string | null) => {
     if (!search) return true;
@@ -51,6 +53,14 @@ export function createFakeAdminServer() {
     return [user.username, user.email, user.firstName, user.lastName].some((field) =>
       field?.toLowerCase().includes(needle),
     );
+  };
+
+  const matchesField = (value: string | undefined, wanted: string | null, exact: boolean) => {
+    if (wanted === null) return true;
+    if (value === undefined) return false;
+    return exact
+      ? value.toLowerCase() === wanted.toLowerCase()
+      : value.toLowerCase().includes(wanted.toLowerCase());
   };
 
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -76,12 +86,21 @@ export function createFakeAdminServer() {
       return role ? json(role) : notFound('Role');
     }
 
+    if (collection === 'groups' && !id && method === 'GET') {
+      const first = Number(url.searchParams.get('first') ?? 0);
+      const max = Number(url.searchParams.get('max') ?? 100);
+      return json([...groups.values()].slice(first, first + max));
+    }
+
     if (collection !== 'users') return notFound('Resource');
 
     if (!id) {
       if (method === 'GET') {
+        const exact = url.searchParams.get('exact') === 'true';
         const found = [...users.values()]
           .filter((u) => matches(u, url.searchParams.get('search')))
+          .filter((u) => matchesField(u.username, url.searchParams.get('username'), exact))
+          .filter((u) => matchesField(u.email, url.searchParams.get('email'), exact))
           .sort((a, b) => a.username.localeCompare(b.username));
         const first = Number(url.searchParams.get('first') ?? 0);
         const max = Number(url.searchParams.get('max') ?? 100);
@@ -89,6 +108,16 @@ export function createFakeAdminServer() {
       }
       if (method === 'POST') {
         const input = body as Partial<StoredUser> & { username: string };
+        const existing = [...users.values()];
+        if (existing.some((u) => matchesField(u.username, input.username, true))) {
+          return json({ errorMessage: 'User exists with same username' }, 409);
+        }
+        if (
+          input.email !== undefined &&
+          existing.some((u) => matchesField(u.email, input.email!, true))
+        ) {
+          return json({ errorMessage: 'User exists with same email' }, 409);
+        }
         const user: StoredUser = {
           emailVerified: false,
           enabled: true,
