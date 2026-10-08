@@ -14,3 +14,9 @@ paths = [
 regexes = [
   '''change-me''',
 ]
+
+[[allowlists]]
+description = "Fake password used only by the onboarding unit tests. It protects nothing."
+regexes = [
+  '''Kd7mPq2xRt9WnH4v''',
+]
