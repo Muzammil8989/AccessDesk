@@ -48,14 +48,16 @@ These are enforced in code and covered by tests where possible. Report vulnerabi
 
 The desktop app shows each user only what their role allows. `packages/shared/src/permissions.ts` says
 which roles may use which feature (`canAccess`, `hasAdminAccess`). The desktop main process reads
-`AUTH_ADMIN_ROLES` and `AUTH_ROLES_CLAIM_PATH` from the same `.env` as the API, with the same validation
-code, so the UI and the API cannot disagree about who is an admin. The sidebar hides entries the
+`AUTH_ADMIN_ROLES`, `AUTH_SUPER_ADMIN_ROLE` and `AUTH_ROLES_CLAIM_PATH` from the same `.env` as the
+API, with the same validation code, so the UI and the API cannot disagree about who is an admin. The sidebar hides entries the
 user cannot use, each screen is guarded against direct navigation, and a signed-in user with no AccessDesk
 role sees only a "no access" page with no menu and no data requests.
 
 This is a convenience, not a security boundary: the renderer reads roles from the token for display only.
 The API checks the real token on every request. If you restrict a feature to one role in
-`permissions.ts`, make the API enforce the same rule for the matching routes.
+`permissions.ts`, make the API enforce the same rule for the matching routes. Today the one case is
+assigning the `admin` role during onboarding: the UI disables the option, and the API refuses it unless
+the caller has the super-admin role (ADR 0010).
 
 ## API hardening
 

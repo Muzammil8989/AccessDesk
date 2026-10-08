@@ -130,6 +130,9 @@ Run all commands from the repository root.
 | `pnpm db:up`         | Start the local PostgreSQL container                                      |
 | `pnpm db:migrate`    | Create and apply a migration after editing `schema.prisma`                |
 
+`pnpm test:e2e` needs a display. Set `TEST_DATABASE_URL` to a PostgreSQL server to also run the
+onboarding retry scenario: the runner creates a throwaway database and drops it afterwards.
+
 The full list, with the Git hooks and testing conventions, is in the
 [development guide](docs/development.md).
 
@@ -180,6 +183,7 @@ packages/
   identity/             IdentityProvider interface, neutral types, access policy, contract test  src/  test/
   identity-keycloak/    The adapter for the first supported provider: ALL of its admin API calls  src/  test/
 docs/                   development guide, provider setup, security rules
+design-system/          design tokens and rules for the desktop UI (accessdesk/MASTER.md)
 scripts/                repo automation (setup, dev:all, clean) and the naming check
 ```
 
@@ -191,7 +195,7 @@ tree and the testing conventions are in the [development guide](docs/development
 | Area     | Technology                                                                          |
 | -------- | ----------------------------------------------------------------------------------- |
 | Desktop  | Electron, electron-vite, React, React Router, TanStack Query, React Hook Form       |
-| UI       | Tailwind CSS, shadcn/ui-style components, Radix UI                                  |
+| UI       | Tailwind CSS, shadcn/ui-style components, Radix UI, Inter (bundled), light and dark |
 | API      | Fastify, Zod, Prisma, pg-boss (scheduled jobs, not wired up yet)                    |
 | Database | PostgreSQL 16                                                                       |
 | Identity | OpenID Connect (Authorization Code + PKCE) through a provider adapter               |
@@ -206,7 +210,9 @@ tree and the testing conventions are in the [development guide](docs/development
 - Login with PKCE through the system browser, token refresh, sign-out (which also ends the identity
   provider session) and session restore after a restart
 - Protected layout and role-aware sidebar (Employees, Onboard, Offboard, Access Review, Audit Log,
-  Settings)
+  Settings). The UI has a light, dark or system theme (saved locally), a sidebar that collapses,
+  toast messages and loading skeletons. Its tokens and rules are in the
+  [design system](design-system/accessdesk/MASTER.md).
 - Employees list with search, pagination, and loading, empty and error states (desktop to API to
   identity provider)
 - API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id`

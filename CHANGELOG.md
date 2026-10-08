@@ -6,6 +6,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- `pnpm test:e2e` now builds the API and the desktop app itself, every time, then runs
+  `apps/desktop/test/e2e/run.mjs`. Do not run `smoke.mjs` directly. The root script no longer runs
+  `pnpm build` first.
+- The IPC wiring (`ipc.ts` and the preload) is no longer excluded from unit coverage. A new contract
+  test checks that every IPC channel has a handler and a preload function.
 - Database: `app_audit_log` also rejects `TRUNCATE` (a statement-level trigger, one more migration). The
   database owner can still drop the triggers (ADR 0008).
 - **Breaking: provider-neutral naming** (ADR 0009). The `IdentityProvider` interface moved to the new
@@ -48,6 +53,17 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
   - API error codes `username_exists` and `email_exists` (`409`).
   - End-to-end test: an onboarding scenario. `pnpm test:e2e` creates a throwaway database when
     `TEST_DATABASE_URL` points at a PostgreSQL server, and drops it afterwards.
+  - Permissions: new feature `onboard-assign-admin`, which needs the super-admin role. `canAccess`
+    takes an optional `superAdminRole`, and a super-admin feature is denied without it.
+  - `@accessdesk/identity/testing` now also exports `createInMemoryIdentityProvider`, a full in-memory
+    provider with failure injection (`failNext`).
+- **Desktop UI redesign.** A new design system ([design-system/accessdesk/MASTER.md](design-system/accessdesk/MASTER.md)):
+  slate and blue tokens, Inter bundled locally (no CDN, the CSP allows `font-src 'self'`), a light, dark
+  or system theme that is saved locally, a sidebar that collapses, toast messages, loading skeletons,
+  inline alerts, an error summary on forms, and a redesigned Employees page. The placeholder screens
+  now show an icon and a short description.
+- Desktop: the only permission the app grants is writing text to the clipboard (for "Copy" on the
+  one-time password), for its own top-level page. Everything else stays denied. See `docs/security.md`.
 - Monorepo with pnpm workspaces and Turborepo: `apps/desktop`, `apps/api`, `packages/shared`,
   `packages/keycloak-client`.
 - Desktop: setup wizard, OIDC login (Authorization Code + PKCE, system browser, loopback redirect),

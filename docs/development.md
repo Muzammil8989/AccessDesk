@@ -17,7 +17,7 @@
 | `pnpm check`         | Everything CI runs: lint, naming check, format check, typecheck, test, build |
 | `pnpm test`          | Unit and integration tests in every package                                  |
 | `pnpm test:coverage` | The same, with a coverage report and minimum thresholds                      |
-| `pnpm test:e2e`      | Build, then run the end-to-end smoke test (opens the app window)             |
+| `pnpm test:e2e`      | Build, then run the end-to-end test (opens the app window)                   |
 | `pnpm lint`          | ESLint, including type-aware, accessibility and boundary rules               |
 | `pnpm check:naming`  | Fails if the provider name appears outside the allowlist (ADR 0009)          |
 | `pnpm typecheck`     | TypeScript strict mode in every package                                      |
@@ -50,10 +50,10 @@ clear message (variable names only, never values) if something is wrong. The var
   and the realm). If it cannot, the API stops at startup and says `IDENTITY_ISSUER_URL` is the problem.
 - A role claim that is absent means "no roles" (the caller gets `403`); a claim of the wrong type makes
   the token invalid (`401`). Claim names that themselves contain a dot are not supported.
-- **The desktop app reads `AUTH_ADMIN_ROLES`, `AUTH_SUPER_ADMIN_ROLE` and `AUTH_ROLES_CLAIM_PATH` too**, from the same `.env`
-  at the repository root and with the same validation code (`loadAccessPolicy` in
-  `@accessdesk/identity`), so the UI and the API cannot disagree. A packaged app has no `.env` beside
-  it: set the two variables in its environment, or it uses the defaults.
+- **The desktop app reads `AUTH_ADMIN_ROLES`, `AUTH_SUPER_ADMIN_ROLE` and `AUTH_ROLES_CLAIM_PATH`
+  too**, from the same `.env` at the repository root and with the same validation code
+  (`loadAccessPolicy` in `@accessdesk/identity`), so the UI and the API cannot disagree. A packaged app
+  has no `.env` beside it: set the three variables in its environment, or it uses the defaults.
 - The desktop's own settings (issuer URL, client ID, API URL) are entered in its setup wizard and saved
   locally. Settings saved by an older version are converted automatically.
 
@@ -107,12 +107,14 @@ accessdesk/
 │       ├── src/
 │       │   ├── main/             main process: auth, stores, IPC, security
 │       │   ├── preload/          the minimal typed bridge
-│       │   ├── renderer/         React UI (components, pages, lib, hooks)
+│       │   ├── renderer/         React UI (components, pages, lib, hooks). Tokens and rules:
+│       │   │                     design-system/accessdesk/MASTER.md
 │       │   └── shared/           IPC contract shared by main, preload and renderer
 │       └── test/
 │           ├── unit/main/        main-process logic, mirrors src/main
 │           ├── unit/renderer/    React screens, with Testing Library in jsdom
-│           └── e2e/              end-to-end smoke test (mock identity provider + real API + real app)
+│           └── e2e/              end-to-end test: run.mjs (scratch database) and smoke.mjs (mock
+│                                 identity provider + real API + real app)
 ├── packages/
 │   ├── identity/                 IdentityProvider interface, neutral types, access policy, and
 │   │   ├── src/                  src/testing/ (the contract test every adapter runs)

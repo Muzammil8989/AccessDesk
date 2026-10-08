@@ -37,7 +37,9 @@ of the code only knows a provider-neutral interface.
   Vite 8), React 19.3.0, `@vitejs/plugin-react` 5.2.0, Tailwind 4.3.3, shadcn/ui-style components
   (hand-written: Radix Slot and Label, class-variance-authority, clsx, tailwind-merge, lucide-react),
   React Hook Form 7.89.0 with `@hookform/resolvers`, Zod 4.6.5, TanStack Query 5.104.1, React Router
-  8.4.0 (hash router).
+  8.4.0 (hash router). Inter Variable is bundled locally (`@fontsource-variable/inter`): the CSP is
+  `font-src 'self'` and the app must work offline. Design tokens and rules are in
+  `design-system/accessdesk/MASTER.md`.
 - `apps/api`: Node.js, Fastify 5.12.5, `@fastify/helmet`, `@fastify/rate-limit`, Prisma **7.10.0**
   (stable; npm's `latest` tag is an 8.0 release candidate) with `@prisma/adapter-pg`, pg-boss 12.37.0
   (stub), jose 6.2.12, pino (through Fastify) with pino-pretty in development, tsup for the build.
@@ -88,9 +90,13 @@ accessdesk/
 │   │   │   ├── config/             env parsing and validation (Zod)
 │   │   │   ├── infra/              db.ts (Prisma + pg adapter), identity.ts (provider factory),
 │   │   │   │                       jobs.ts (stub)
+│   │   │   ├── errors.ts           AppError (status, code, message)
 │   │   │   ├── modules/
+│   │   │   │   ├── audit/          audit repository interface and Prisma implementation
 │   │   │   │   ├── employees/      routes, service, mapper
 │   │   │   │   ├── health/         /health and /ready
+│   │   │   │   ├── onboarding/     routes, service, steps, runner, audit observer, errors,
+│   │   │   │   │                   temporary-password
 │   │   │   │   └── templates/      routes, repository interface, Prisma repository
 │   │   │   ├── plugins/            auth.ts (JWT + role guard), jwks.ts (signing keys through
 │   │   │   │                       OIDC discovery), error-handler.ts
@@ -105,12 +111,14 @@ accessdesk/
 │       │   ├── preload/            index.ts: the typed bridge
 │       │   ├── renderer/           index.html and src/ (components, pages, hooks, lib, router, styles)
 │       │   └── shared/             ipc.ts: channel names and types
-│       └── test/                   unit/main/, unit/renderer/, e2e/smoke.mjs
+│       └── test/                   unit/main/, unit/renderer/, e2e/ (run.mjs, smoke.mjs)
 ├── packages/
-│   ├── shared/                     src/ (employee, template, settings, error, permissions), test/unit/
+│   ├── shared/                     src/ (employee, template, settings, error, onboarding,
+│   │                               permissions), test/unit/
 │   ├── identity/                   src/ (identity, access, index, testing/), test/unit/
 │   └── identity-keycloak/          src/ (keycloak-api, identity-provider, index), test/ (unit,
 │                                   integration, helpers)
+├── design-system/accessdesk/       MASTER.md: UI tokens, typography, motion, interaction rules
 ├── docs/                           development, keycloak-setup.md, security, adr/, this file
 ├── scripts/                        lib.mjs, setup.mjs, dev-all.mjs, clean.mjs, check-naming.mjs,
 │                                   naming-allowlist.json
@@ -140,11 +148,23 @@ output `apps/api/src/generated/prisma` (git-ignored).
 
 - Routes: `GET /health` (liveness), `GET /ready` (readiness, 503 with no detail if the database does
   not answer), `GET /templates`, `GET /employees` (query: `search`, `first`, `max` up to 100, returns
-  items plus `total`), `GET /employees/:id` (UUID only).
+  items plus `total`), `GET /employees/:id` (UUID only), and the onboarding routes (ADR 0010):
+  `GET /onboarding/options` (departments from the provider's groups, and the roles with an `allowed`
+  flag), `POST /onboarding` (`201`, or `207` with `status: 'partial'` when a step after `create_user`
+  failed) and `POST /onboarding/:subjectId/retry` (`200` or `207`). They are limited to 20 requests a
+  minute per IP, per route, and answer with `Cache-Control: no-store`. Error codes `username_exists`
+  and `email_exists` are `409`.
+- **Onboarding.** `OnboardingService` runs three steps (`create_user`, `add_to_group`, `assign_role`)
+  through `runSteps`, one object per step, and an observer writes an audit row for each. There is no
+  automatic rollback. A retry needs a `SUCCESS` audit row for `onboarding.create_user` for that
+  subject, by the same actor, in the last 24 hours, and skips what is already done. The temporary
+  password is generated on the server (`crypto.randomInt`, 16 characters), sent to the provider as a
+  temporary credential and returned once. It is never stored, logged or audited. Only the role named by
+  `AUTH_SUPER_ADMIN_ROLE` may assign `admin`.
 - **Layers and dependency injection.** Routes only handle HTTP. `EmployeesService` depends on the
   `IdentityProvider` interface. Templates use a `TemplateRepository` interface with a Prisma
-  implementation. `buildApp(deps)` takes `{ config, templates, identityFor, checkDatabase, keyResolver? }`,
-  where `identityFor` is an `IdentityProviderFactory`: `(adminAccessToken) => IdentityProvider`.
+  implementation. `buildApp(deps)` takes `{ config, templates, audit, identityFor, checkDatabase,
+keyResolver?, fetch?, clock?, generatePassword?, logStream? }`, where `identityFor` is an `IdentityProviderFactory`: `(adminAccessToken) => IdentityProvider`.
   `server.ts` is the only place that picks real implementations (through
   `createIdentityProviderFactory` in `infra/identity.ts`, which chooses the adapter by
   `IDENTITY_PROVIDER` and validates it at startup). Only those two files may import an adapter
@@ -167,20 +187,24 @@ output `apps/api/src/generated/prisma` (git-ignored).
   validated), `IDENTITY_ISSUER_URL` (required, the OIDC issuer; for the first provider
   `http://host/realms/<realm>`), `IDENTITY_CLIENT_ID` (required), optional `IDENTITY_AUDIENCE`
   (defaults to the client ID), `AUTH_ADMIN_ROLES` (default `super-admin,hr-admin`),
-  `AUTH_ROLES_CLAIM_PATH` (default `realm_access.roles`), `DATABASE_URL`, `API_PORT`, optional
+  `AUTH_SUPER_ADMIN_ROLE` (default `super-admin`), `AUTH_ROLES_CLAIM_PATH` (default `realm_access.roles`), `DATABASE_URL`, `API_PORT`, optional
   `API_HOST`, `API_TRUST_PROXY`, `RATE_LIMIT_PER_MINUTE`, `LOG_LEVEL`, and `POSTGRES_PASSWORD` for
   compose.
 
 ### Identity provider adapter (`packages/identity` and `packages/identity-keycloak`)
 
 `packages/identity` (`@accessdesk/identity`) holds the provider-neutral `IdentityProvider` interface:
-`listUsers`, `countUsers`, `getUser`, `createUser`, `disableUser`, `endAllSessions`, `getUserGroups`,
-`addUserToGroup`, `removeUserFromGroup`, `getUserRoles`, `addUserRoles`, `removeUserRoles`. It also
+`listUsers`, `countUsers`, `findUsers` (exact username or email), `getUser`, `createUser` (with
+optional `emailVerified` and a temporary `initialPassword`), `disableUser`, `endAllSessions`,
+`listGroups`, `getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `getUserRoles`,
+`addUserRoles`, `removeUserRoles`. It also
 holds the neutral types (`IdentityUser` with `subjectId`, `username`, `email`, `firstName`,
 `lastName`, `enabled`, `emailVerified`, `createdAt`; `IdentityGroup`; `IdentityRole`), the
 `IdentityProviderError` (carries an HTTP-style status), the access policy (`DEFAULT_ADMIN_ROLES`,
-`DEFAULT_ROLES_CLAIM_PATH`, `loadAccessPolicy`, `readRolesFromClaims`) and the contract test helper
-`runIdentityProviderContract`, exported from `@accessdesk/identity/testing`.
+`DEFAULT_SUPER_ADMIN_ROLE`, `DEFAULT_ROLES_CLAIM_PATH`, `loadAccessPolicy`, `readRolesFromClaims`)
+and, exported from `@accessdesk/identity/testing`, the contract test helper
+`runIdentityProviderContract` and `createInMemoryIdentityProvider` (a full in-memory provider with
+failure injection that passes the same contract).
 
 `packages/identity-keycloak` (`@accessdesk/identity-keycloak`) is the adapter for the first supported
 provider. Only `src/keycloak-api.ts` knows its admin REST paths and raw response shapes.
@@ -188,8 +212,9 @@ provider. Only `src/keycloak-api.ts` knows its admin REST paths and raw response
 `createKeycloakIdentityProvider({ issuerUrl, getToken, fetch? })`. It derives the admin API base URL
 and the realm from the issuer URL and throws a clear error when it cannot. Role names are resolved to
 representations internally. Responses are validated with Zod. Failures throw `IdentityProviderError`
-with the status and never the token. The write functions exist and are tested, but no API route uses
-them yet.
+with the status and never the token. The onboarding routes use `createUser`, `findUsers`,
+`listGroups`, `addUserToGroup`, `getUserGroups`, `getUserRoles` and `addUserRoles`. The other write
+functions exist and are tested, but no API route uses them yet.
 
 ### Desktop app (`apps/desktop`)
 
@@ -208,8 +233,12 @@ them yet.
     discarded, memory only without secure storage) behind a `TokenStorage` interface.
   - `store/settingsStore.ts`: plain JSON with public values only (`issuerUrl`, `clientId`, `apiUrl`).
     `store/legacy-settings.ts` migrates older saved settings automatically.
-  - `apiClient.ts`: GET through to the API with the bearer token, one retry after a 401 with a fresh
-    token, `redirect: 'error'`, path allowlist regex, friendly errors that never contain the token.
+  - `apiClient.ts`: `get` (15 s timeout) and two fixed writes, `createOnboarding` and
+    `retryOnboarding` (30 s timeout; the paths are built here and the input is validated with the
+    shared schemas). The bearer token is added here. One retry after a 401 with a fresh token, never
+    after a network error or timeout (a write may already have been applied). `redirect: 'error'`,
+    path allowlist regex, friendly errors that never contain the token. API errors carry their
+    `code`, and `207` counts as a success with a body.
   - `security.ts`: `app://accessdesk` origin helpers, CSP builder (production: `default-src 'none'`,
     scripts and styles from `self`, `connect-src 'none'`), path-traversal-safe file resolver.
   - `index.ts`, `window.ts`, `ipc.ts`: Electron wiring: single instance lock, sandbox, `app://` protocol
@@ -225,10 +254,23 @@ them yet.
   "Test connection" button, and the settings page card is titled "Identity provider connection". The
   login button says "Sign in". API responses are validated against the shared schemas, and a bad shape becomes a plain
   message, never raw validation output.
+- **Look and feel** (see `design-system/accessdesk/MASTER.md`). A Light, Dark or System theme
+  (`lib/theme.ts`, saved in `localStorage`, the `.dark` class on `<html>`), a sidebar that collapses
+  (automatically on narrow windows, or by hand), toast messages (`lib/toast.ts`, errors stay until
+  dismissed), loading skeletons, inline alerts, and forms that show an error summary linking to each
+  invalid field. Colours come only from semantic tokens in `styles.css`.
+- **Onboard screen.** A form (first name, last name, email, username, department, role) that loads its
+  options from `GET /onboarding/options`. The `admin` option is disabled unless the user holds the
+  super-admin role (the API enforces it). A complete result shows the one-time temporary password with
+  a Copy button and a reminder that it is shown once. A partial result lists each step and offers
+  Retry. The password lives only in component state and is cleared when the admin leaves the page. If
+  the response to a create is lost, the screen tells the admin to check the Employees list.
 - **Role-based visibility.** `packages/shared/src/permissions.ts` says which roles may use which
-  feature (`hasAdminAccess(roles, adminRoles)`, `canAccess(roles, feature, adminRoles)`). The main
-  process reads `AUTH_ADMIN_ROLES` and `AUTH_ROLES_CLAIM_PATH` from the same repo-root `.env` as the
-  API, with the same validation code (`loadAccessPolicy`), so the UI and the API cannot disagree. The
+  feature (`hasAdminAccess(roles, adminRoles)`,
+  `canAccess(roles, feature, adminRoles, superAdminRole?)`; a `super-admin` feature such as
+  `onboard-assign-admin` is denied without `superAdminRole`). The main process reads
+  `AUTH_ADMIN_ROLES`, `AUTH_SUPER_ADMIN_ROLE` and `AUTH_ROLES_CLAIM_PATH` from the same repo-root `.env`
+  as the API, with the same validation code (`loadAccessPolicy`), so the UI and the API cannot disagree. The
   sidebar hides what a user cannot use, `RequireFeature` guards each screen, and a signed-in
   user with no AccessDesk role sees only the no-access page (their roles, a troubleshooting list, sign
   out). This is a convenience: the API is the real gatekeeper, and any restriction added to
@@ -253,7 +295,10 @@ lint-staged, pre-push runs typecheck and tests.
   set, and every adapter must pass the shared contract test (`runIdentityProviderContract`). The
   e2e test starts a mock identity provider (discovery, JWKS, PKCE-verifying token endpoint, a few admin
   endpoints), the **real built API** and the **real built Electron app**, and drives it with Playwright
-  (35 checks, including the no-access scenario, session restore after restart and CSP enforcement).
+  (including the no-access scenario, session restore after restart, CSP enforcement and an onboarding
+  scenario). `pnpm test:e2e` rebuilds the API and the app each time. Without `TEST_DATABASE_URL` the
+  onboarding retry scenario is skipped (the audit log needs a database); with it, `e2e/run.mjs`
+  creates a throwaway `accessdesk_e2e_<hex>` database, migrates it, runs the test and drops it.
 - **Coverage thresholds** are a floor in each `vitest.config.ts` (95% lines, statements and functions
   for the API and packages, 90/88/85 for the desktop app, 75% branches). Electron glue is excluded from
   unit coverage and exercised by the e2e test.
@@ -288,8 +333,11 @@ lint-staged, pre-push runs typecheck and tests.
 
 ## Known gaps and open questions
 
-- Onboard, Offboard, Access Review and Audit Log screens, and employee detail and edit screens, are not
-  built. No API route uses the identity provider's write functions yet.
+- Onboarding is only part 1: checklists, templates, manager, start date, bulk import and email are not
+  built. Offboard, Access Review and Audit Log screens, and employee detail and edit screens, are not
+  built. Only the onboarding routes use the identity provider's write functions.
+- Onboarding has been tested against fakes only (an in-memory provider, a fake admin API and a mock
+  identity provider in the e2e test), not against a real identity provider. See ADR 0010.
 - **Scheduled actions (pg-boss):** a job that runs later has no logged-in admin token to forward.
   Decide between stored offline tokens and running the action when an admin next opens the app, before
   building them (ADR 0003, `apps/api/src/infra/jobs.ts`).
@@ -311,7 +359,7 @@ lint-staged, pre-push runs typecheck and tests.
 ## Acceptance checklist
 
 - `pnpm check` and `pnpm test:coverage` pass.
-- `pnpm test:e2e` passes (35 checks).
+- `pnpm test:e2e` passes (with `TEST_DATABASE_URL` set, so the onboarding retry scenario runs too).
 - `pnpm audit` reports no known vulnerabilities.
 - `pnpm setup` then `pnpm dev:all` starts the database, the API and the app. The first launch shows the
   setup wizard.
