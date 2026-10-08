@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { ApiQuery } from '../../../shared/ipc';
+import type { ApiQuery, ApiResponse } from '../../../shared/ipc';
 
 export class ApiRequestError extends Error {
   readonly retryable: boolean;
@@ -8,6 +8,7 @@ export class ApiRequestError extends Error {
     message: string,
     readonly status: number,
     retryable = status === 0 || status >= 500,
+    readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiRequestError';
@@ -15,13 +16,10 @@ export class ApiRequestError extends Error {
   }
 }
 
-export async function apiGet<S extends z.ZodType>(
-  path: string,
-  schema: S,
-  query?: ApiQuery,
-): Promise<z.infer<S>> {
-  const response = await window.accessdesk.api.get(path, query);
-  if (!response.ok) throw new ApiRequestError(response.message, response.status);
+export function parseResponse<S extends z.ZodType>(response: ApiResponse, schema: S): z.infer<S> {
+  if (!response.ok) {
+    throw new ApiRequestError(response.message, response.status, undefined, response.code);
+  }
 
   const parsed = schema.safeParse(response.data);
   if (!parsed.success) {
@@ -32,4 +30,12 @@ export async function apiGet<S extends z.ZodType>(
     );
   }
   return parsed.data;
+}
+
+export async function apiGet<S extends z.ZodType>(
+  path: string,
+  schema: S,
+  query?: ApiQuery,
+): Promise<z.infer<S>> {
+  return parseResponse(await window.accessdesk.api.get(path, query), schema);
 }

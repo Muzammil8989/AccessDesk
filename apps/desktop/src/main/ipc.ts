@@ -26,6 +26,8 @@ const apiGetSchema = z.object({
   query: z.record(z.string().max(50), z.union([z.string().max(200), z.number()])).optional(),
 });
 
+const onboardingRetryCallSchema = z.object({ subjectId: z.string(), input: z.unknown() });
+
 function describeIssues(error: z.ZodError): string {
   return error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
 }
@@ -99,6 +101,14 @@ export function registerIpc(deps: IpcDeps): void {
     const parsed = apiGetSchema.safeParse(input);
     if (!parsed.success) return { ok: false, status: 400, message: 'Invalid request' } as const;
     return deps.api.get(parsed.data.path, parsed.data.query);
+  });
+
+  handle(IPC.apiOnboardingCreate, (input: unknown) => deps.api.createOnboarding(input));
+
+  handle(IPC.apiOnboardingRetry, async (payload: unknown) => {
+    const parsed = onboardingRetryCallSchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, status: 400, message: 'Invalid request' } as const;
+    return deps.api.retryOnboarding(parsed.data.subjectId, parsed.data.input);
   });
 }
 

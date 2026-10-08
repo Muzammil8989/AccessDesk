@@ -15,6 +15,10 @@ const api: AccessDeskApi = {
   },
   api: {
     get: (path, query) => ipcRenderer.invoke(IPC.apiGet, { path, query }),
+    onboarding: {
+      create: (input) => ipcRenderer.invoke(IPC.apiOnboardingCreate, input),
+      retry: (subjectId, input) => ipcRenderer.invoke(IPC.apiOnboardingRetry, { subjectId, input }),
+    },
   },
 };
 

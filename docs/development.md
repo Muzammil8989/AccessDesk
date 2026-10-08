@@ -43,13 +43,14 @@ clear message (variable names only, never values) if something is wrong. The var
 | `IDENTITY_CLIENT_ID`    | (required)             | The public client used by the desktop app                               |
 | `IDENTITY_AUDIENCE`     | the client ID          | Expected `aud` claim of access tokens                                   |
 | `AUTH_ADMIN_ROLES`      | `super-admin,hr-admin` | Comma-separated role names. Any one grants access. No blank names       |
+| `AUTH_SUPER_ADMIN_ROLE` | `super-admin`          | The one role that may give someone the `admin` role. No blank name      |
 | `AUTH_ROLES_CLAIM_PATH` | `realm_access.roles`   | Dot-separated path to the array of role names in the access token       |
 
 - The adapter derives what it needs from the issuer URL (for the first provider, the admin API base URL
   and the realm). If it cannot, the API stops at startup and says `IDENTITY_ISSUER_URL` is the problem.
 - A role claim that is absent means "no roles" (the caller gets `403`); a claim of the wrong type makes
   the token invalid (`401`). Claim names that themselves contain a dot are not supported.
-- **The desktop app reads `AUTH_ADMIN_ROLES` and `AUTH_ROLES_CLAIM_PATH` too**, from the same `.env`
+- **The desktop app reads `AUTH_ADMIN_ROLES`, `AUTH_SUPER_ADMIN_ROLE` and `AUTH_ROLES_CLAIM_PATH` too**, from the same `.env`
   at the repository root and with the same validation code (`loadAccessPolicy` in
   `@accessdesk/identity`), so the UI and the API cannot disagree. A packaged app has no `.env` beside
   it: set the two variables in its environment, or it uses the defaults.
@@ -88,8 +89,11 @@ accessdesk/
 │   │   │   ├── infra/            real implementations of outside things: database, identity
 │   │   │   │                     (identity.ts: the factory type and the adapter choice), job queue (stub)
 │   │   │   ├── modules/          one folder per feature, each with its own layers
+│   │   │   │   ├── audit/        audit repository interface and its Prisma implementation
 │   │   │   │   ├── employees/    routes (HTTP), service (use cases), mapper
 │   │   │   │   ├── health/       /health (liveness) and /ready (readiness)
+│   │   │   │   ├── onboarding/   routes, service, the step pipeline (steps, runner, audit
+│   │   │   │   │                 observer), password generator
 │   │   │   │   └── templates/    routes, repository interface, Prisma repository
 │   │   │   ├── plugins/          cross-cutting Fastify plugins: auth (JWT + role guard), jwks
 │   │   │   │                     (OIDC discovery of signing keys), error handler
@@ -159,7 +163,23 @@ system design are explained in full in [coding-standards.md](coding-standards.md
   several parts together. `test/helpers/` holds shared test utilities. `test/e2e/` holds end-to-end tests.
 - Test files are named `<thing>.test.ts` (or `.tsx` for React).
 - Tests never need a real identity provider. The API tests sign real JWTs with a local key set and use
-  fake repositories and fake `IdentityProvider`s. The e2e test starts a mock identity provider itself.
+  fake repositories and fake `IdentityProvider`s. `createInMemoryIdentityProvider` (in
+  `@accessdesk/identity/testing`) is a full in-memory provider with failure injection (`failNext`); it
+  runs the same contract as the real adapter. The e2e test starts a mock identity provider itself.
+- **Running the e2e test.** `pnpm test:e2e` (from the repo root or from `apps/desktop`) rebuilds the
+  API and the desktop app every time before it starts, so it can never test a stale `out/` or
+  `dist/`. Do not run `test/e2e/smoke.mjs` directly: that skips the build. It needs a display.
+  Without a database it skips the retry
+  scenario, because the audit log needs one. To run all of it, point `TEST_DATABASE_URL` at a
+  PostgreSQL server. The runner (`apps/desktop/test/e2e/run.mjs`) creates a throwaway database
+  `accessdesk_e2e_<hex>` through the `postgres` maintenance database, applies the migrations to it,
+  runs the test, and drops it. It never uses your development database, and the test refuses any
+  database not named that way:
+
+  ```
+  TEST_DATABASE_URL=postgresql://accessdesk:change-me@localhost:5432/postgres pnpm test:e2e
+  ```
+
 - The one exception to "no database" is `apps/api/test/integration/database-migrations.test.ts`: the
   migrations are SQL, so it runs them on a real PostgreSQL. It creates and drops its own scratch
   database and is **skipped unless `TEST_DATABASE_URL` is set** (CI sets it). Locally, with the Docker
@@ -174,7 +194,9 @@ system design are explained in full in [coding-standards.md](coding-standards.md
 - Test behavior that users or callers can see (a screen's states, an HTTP status), not internals.
   When a bug is found, add a test that fails without the fix.
 - Coverage thresholds in each `vitest.config.ts` are a floor. Code that is only glue to Electron
-  (`main/index.ts`, `window.ts`, `ipc.ts`) is excluded from unit coverage and exercised by the e2e test.
+  (`main/index.ts`, `window.ts`) is excluded from unit coverage and exercised by the e2e test. The
+  IPC wiring (`ipc.ts` and the preload) is not excluded: `test/unit/main/ipc-contract.test.ts` checks
+  that every channel in `src/shared/ipc.ts` has a handler and a preload function.
 
 ## Adding a feature (API)
 
@@ -187,5 +209,13 @@ system design are explained in full in [coding-standards.md](coding-standards.md
    needs storage. Register the routes in `app.ts` and pass real implementations from `server.ts`.
 4. Add tests in `apps/api/test/`.
 5. If the UI needs it, add the feature to `packages/shared/src/permissions.ts` and the API route's
-   role check ([ADR 0006](adr/0006-ui-visibility-is-not-authorization.md)).
+   role check ([ADR 0006](adr/0006-ui-visibility-is-not-authorization.md)). A feature that needs
+   the super-admin role passes `superAdminRole` (from `AuthStatus` in the desktop, from `Config` in the
+   API) to `canAccess`, or it is denied.
 6. Run `pnpm check`.
+
+Onboarding ([ADR 0010](adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md)) is the
+worked example: `packages/shared/src/onboarding.ts` (schemas and role policy),
+`apps/api/src/modules/onboarding/` (routes, service, one object per step run by `runSteps`, an
+observer that audits each step) and `apps/desktop/src/renderer/src/pages/onboard-page.tsx`. A new step
+is a new object in the pipeline, not a change to the runner.

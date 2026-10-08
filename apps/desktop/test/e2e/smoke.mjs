@@ -18,11 +18,21 @@ const jose = await import(pathToFileURL(apiReq.resolve('jose')).href);
 for (const built of ['apps/api/dist/server.js', 'apps/desktop/out/main/index.js']) {
   if (!existsSync(path.join(ROOT, built))) {
     console.error(
-      `Missing ${built}. Run "pnpm build" first (or use "pnpm test:e2e" from the repo root).`,
+      `Missing ${built}. Run "pnpm test:e2e": it builds the API and the app first, which running this file directly does not.`,
     );
     process.exit(2);
   }
 }
+
+const SCRATCH_DATABASE_NAME = /^accessdesk_e2e_[0-9a-f]{8}$/;
+const E2E_DATABASE_URL = process.env.E2E_DATABASE_URL;
+if (E2E_DATABASE_URL && !SCRATCH_DATABASE_NAME.test(new URL(E2E_DATABASE_URL).pathname.slice(1))) {
+  console.error('E2E_DATABASE_URL must name a scratch database called accessdesk_e2e_<8 hex>.');
+  process.exit(2);
+}
+const HAS_DATABASE = Boolean(E2E_DATABASE_URL);
+const API_DATABASE_URL =
+  E2E_DATABASE_URL ?? 'postgresql://e2e:e2e@127.0.0.1:1/accessdesk_e2e_unused';
 
 const IDP_PORT = 18080;
 const API_PORT = 14000;
@@ -41,6 +51,23 @@ const refreshTokens = new Set();
 const issuedAccessTokens = [];
 let issuedRoles = ['hr-admin', 'offline_access'];
 const stats = { adminCalls: 0, adminBadAuth: 0, logoutBodies: [], tokenForms: [] };
+
+const ADMIN_PREFIX = '/admin/realms/company-platform';
+const groups = [
+  { id: 'g-eng', name: 'Engineering', path: '/Engineering' },
+  { id: 'g-sales', name: 'Sales', path: '/Sales' },
+];
+const roles = new Map(
+  ['member', 'manager', 'admin'].map((name) => [name, { id: randomUUID(), name }]),
+);
+const memberships = new Map();
+const roleMappings = new Map();
+const onboarding = {
+  created: [],
+  groupPuts: [],
+  roleMappingPosts: [],
+  failNextRoleMapping: false,
+};
 
 const users = Array.from({ length: 25 }, (_, i) => {
   const n = String(i + 1).padStart(2, '0');
@@ -140,7 +167,7 @@ const idp = createServer(async (req, res) => {
     res.writeHead(204);
     return res.end();
   }
-  if (p.startsWith('/admin/realms/company-platform/users')) {
+  if (p.startsWith(`${ADMIN_PREFIX}/`)) {
     stats.adminCalls++;
     try {
       const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
@@ -149,14 +176,117 @@ const idp = createServer(async (req, res) => {
       stats.adminBadAuth++;
       return sendJson(res, 401, { error: 'HTTP 401 Unauthorized' });
     }
-    const search = (url.searchParams.get('search') ?? '').toLowerCase();
-    const matches = users.filter(
-      (u) => !search || JSON.stringify(u).toLowerCase().includes(search),
-    );
-    if (p.endsWith('/count')) return sendJson(res, 200, matches.length);
+    const [collection, id, sub, subId] = p
+      .slice(ADMIN_PREFIX.length)
+      .split('/')
+      .filter(Boolean)
+      .map(decodeURIComponent);
     const first = Number(url.searchParams.get('first') ?? 0);
     const max = Number(url.searchParams.get('max') ?? 100);
-    return sendJson(res, 200, matches.slice(first, first + max));
+
+    if (collection === 'groups' && !id && req.method === 'GET') {
+      return sendJson(res, 200, groups.slice(first, first + max));
+    }
+    if (collection === 'roles' && id && !sub && req.method === 'GET') {
+      return roles.has(id)
+        ? sendJson(res, 200, roles.get(id))
+        : sendJson(res, 404, { errorMessage: 'Role not found' });
+    }
+    if (collection !== 'users') return sendJson(res, 404, { error: 'not found' });
+
+    if (!id && req.method === 'POST') {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      if (users.some((u) => u.username === String(body.username).toLowerCase())) {
+        return sendJson(res, 409, { errorMessage: 'User exists with same username' });
+      }
+      if (body.email && users.some((u) => u.email === String(body.email).toLowerCase())) {
+        return sendJson(res, 409, { errorMessage: 'User exists with same email' });
+      }
+      const created = {
+        id: randomUUID(),
+        username: String(body.username).toLowerCase(),
+        email: body.email ? String(body.email).toLowerCase() : null,
+        firstName: body.firstName ?? null,
+        lastName: body.lastName ?? null,
+        enabled: body.enabled ?? true,
+        emailVerified: body.emailVerified ?? false,
+        createdTimestamp: Date.now(),
+      };
+      users.push(created);
+      onboarding.created.push({ id: created.id, body });
+      res.writeHead(201, { Location: `${IDP}${ADMIN_PREFIX}/users/${created.id}` });
+      return res.end();
+    }
+
+    if (!id && req.method === 'GET') {
+      const search = (url.searchParams.get('search') ?? '').toLowerCase();
+      const exact = url.searchParams.get('exact') === 'true';
+      const field = (value, wanted) =>
+        wanted === null ||
+        (exact
+          ? value?.toLowerCase() === wanted.toLowerCase()
+          : Boolean(value?.toLowerCase().includes(wanted.toLowerCase())));
+      const found = users.filter(
+        (u) =>
+          (!search || JSON.stringify(u).toLowerCase().includes(search)) &&
+          field(u.username, url.searchParams.get('username')) &&
+          field(u.email, url.searchParams.get('email')),
+      );
+      return sendJson(res, 200, found.slice(first, first + max));
+    }
+    if (id === 'count' && req.method === 'GET') {
+      const search = (url.searchParams.get('search') ?? '').toLowerCase();
+      return sendJson(
+        res,
+        200,
+        users.filter((u) => !search || JSON.stringify(u).toLowerCase().includes(search)).length,
+      );
+    }
+
+    const user = users.find((u) => u.id === id);
+    if (!user) return sendJson(res, 404, { errorMessage: 'User not found' });
+    if (sub === 'groups') {
+      const joined = memberships.get(id) ?? new Set();
+      if (!subId && req.method === 'GET') {
+        return sendJson(
+          res,
+          200,
+          groups.filter((g) => joined.has(g.id)),
+        );
+      }
+      if (subId && req.method === 'PUT') {
+        if (!groups.some((g) => g.id === subId)) {
+          return sendJson(res, 404, { errorMessage: 'Group not found' });
+        }
+        onboarding.groupPuts.push({ userId: id, groupId: subId });
+        memberships.set(id, joined.add(subId));
+        res.writeHead(204);
+        return res.end();
+      }
+    }
+    if (sub === 'role-mappings' && subId === 'realm') {
+      const assigned = roleMappings.get(id) ?? new Set();
+      if (req.method === 'GET') {
+        return sendJson(
+          res,
+          200,
+          [...assigned].map((name) => roles.get(name)),
+        );
+      }
+      if (req.method === 'POST') {
+        const body = JSON.parse((await readBody(req)) || '[]');
+        if (onboarding.failNextRoleMapping) {
+          onboarding.failNextRoleMapping = false;
+          return sendJson(res, 500, { errorMessage: 'Simulated failure' });
+        }
+        onboarding.roleMappingPosts.push({ userId: id, names: body.map((r) => r.name) });
+        for (const role of body) assigned.add(role.name);
+        roleMappings.set(id, assigned);
+        res.writeHead(204);
+        return res.end();
+      }
+    }
+    return sendJson(res, 404, { error: 'not found' });
   }
   sendJson(res, 404, { error: 'not found' });
 });
@@ -164,6 +294,7 @@ await new Promise((r) => idp.listen(IDP_PORT, '127.0.0.1', r));
 
 const ACCESS_POLICY = {
   AUTH_ADMIN_ROLES: 'hr-admin,super-admin',
+  AUTH_SUPER_ADMIN_ROLE: 'super-admin',
   AUTH_ROLES_CLAIM_PATH: 'realm_access.roles',
 };
 const apiLogs = [];
@@ -175,7 +306,7 @@ const api = spawn('node', ['dist/server.js'], {
     IDENTITY_ISSUER_URL: ISSUER,
     IDENTITY_CLIENT_ID: 'accessdesk',
     ...ACCESS_POLICY,
-    DATABASE_URL: 'postgresql://accessdesk:change-me@localhost:5432/accessdesk',
+    DATABASE_URL: API_DATABASE_URL,
     API_PORT: String(API_PORT),
   },
 });
@@ -200,6 +331,7 @@ const launch = () =>
   });
 const consoleLogs = [];
 let app;
+let onboardedPassword = '';
 
 try {
   app = await launch();
@@ -217,6 +349,7 @@ try {
     buffer: typeof Buffer,
     bridge: Object.keys(window.accessdesk),
     bridgeApi: Object.keys(window.accessdesk.api),
+    bridgeOnboarding: Object.keys(window.accessdesk.api.onboarding),
     evalResult: (() => {
       try {
         eval('1+1');
@@ -235,6 +368,12 @@ try {
     'preload exposes only settings/auth/api',
     env.bridge.sort().join() === 'api,auth,settings',
     env.bridge.join(),
+  );
+  check(
+    'the only write calls on the bridge are the two onboarding ones',
+    env.bridgeApi.sort().join() === 'get,onboarding' &&
+      env.bridgeOnboarding.sort().join() === 'create,retry',
+    `${env.bridgeApi.join()} / ${env.bridgeOnboarding.join()}`,
   );
   const cspHeader = await app.evaluate(async ({ net }) =>
     (await net.fetch('app://accessdesk/index.html')).headers.get('content-security-policy'),
@@ -329,7 +468,7 @@ try {
   await win.getByText(/No employees match/).waitFor({ timeout: 10000 });
   check('empty state works', true);
 
-  for (const name of ['Onboard', 'Offboard', 'Access Review', 'Audit Log']) {
+  for (const name of ['Offboard', 'Access Review', 'Audit Log']) {
     await win.getByRole('link', { name }).click();
     await win.getByRole('heading', { name }).waitFor({ timeout: 5000 });
   }
@@ -363,6 +502,163 @@ try {
   await win.getByRole('heading', { name: 'Employees' }).waitFor({ timeout: 15000 });
   await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 15000 });
   check('session survives an app restart without signing in again', true);
+
+  await win.getByRole('link', { name: 'Onboard' }).click();
+  await win.getByRole('heading', { name: 'Onboard' }).waitFor({ timeout: 5000 });
+  await win.getByLabel('First name').waitFor({ timeout: 10000 });
+  check(
+    'onboard form lists the departments from the identity provider',
+    (await win.getByLabel('Department').locator('option').allInnerTexts()).join() ===
+      'Select a department,Engineering,Sales',
+  );
+  const adminOption = win.getByLabel('Role').locator('option', { hasText: 'Admin' });
+  check('admin role is disabled for an hr-admin', await adminOption.isDisabled());
+  check(
+    'owner role is never offered',
+    (await win.getByLabel('Role').locator('option', { hasText: 'Owner' }).count()) === 0,
+  );
+  await win.getByRole('button', { name: 'Onboard employee' }).click();
+  await win.getByText('Enter a first name').waitFor({ timeout: 5000 });
+  check('onboard form explains missing fields in plain language', true);
+
+  const fillOnboardForm = async (username, email) => {
+    await win.getByLabel('First name').fill('Nina');
+    await win.getByLabel('Last name').fill('Novak');
+    await win.getByLabel('Email').fill(email);
+    await win.getByLabel('Username').fill(username);
+    await win.getByLabel('Department').selectOption({ label: 'Engineering' });
+    await win.getByLabel('Role').selectOption({ label: 'Member' });
+    await win.getByRole('button', { name: 'Onboard employee' }).click();
+  };
+
+  await fillOnboardForm('ann', 'nina@example.com');
+  await win.getByText('Username already exists').waitFor({ timeout: 10000 });
+  check(
+    'a taken username is reported next to the username field',
+    (await win.getByLabel('Username').getAttribute('aria-invalid')) === 'true',
+  );
+  check('nothing was created for the duplicate', onboarding.created.length === 0);
+
+  await fillOnboardForm('nina.novak', 'nina@example.com');
+  await win.getByText('Employee onboarded').waitFor({ timeout: 15000 });
+  onboardedPassword = (await win.getByLabel('Temporary password').innerText()).trim();
+  check(
+    'onboarding shows a 16 character one-time password',
+    /^[A-Za-z0-9]{16}$/.test(onboardedPassword),
+  );
+  check(
+    'success screen warns the password will not be shown again',
+    await win.getByText(/will not be shown again/).isVisible(),
+  );
+  const createdUser = onboarding.created.find((c) => c.body.username === 'nina.novak');
+  check(
+    'the identity provider got a verified, enabled user with a temporary password',
+    createdUser?.body.emailVerified === true &&
+      createdUser.body.enabled === true &&
+      createdUser.body.credentials?.[0]?.temporary === true &&
+      createdUser.body.credentials[0].value === onboardedPassword,
+  );
+  check(
+    'the user was added to the department and given the role',
+    createdUser !== undefined &&
+      onboarding.groupPuts.some((g) => g.userId === createdUser.id && g.groupId === 'g-eng') &&
+      onboarding.roleMappingPosts.some(
+        (r) => r.userId === createdUser.id && r.names.join() === 'member',
+      ),
+  );
+  check(
+    'every onboarding call used a token the identity provider accepted',
+    stats.adminBadAuth === 0,
+  );
+  await win.screenshot({ path: path.join(SHOTS, '6-onboarded.png') });
+
+  // Copy needs the one clipboard-write permission the app grants. Read the real system clipboard
+  // from the main process; never print its content.
+  await app.evaluate(({ clipboard }) => clipboard.writeText('stale clipboard text'));
+  await win.getByRole('button', { name: 'Copy' }).click();
+  await win.getByRole('button', { name: 'Copied' }).waitFor({ timeout: 5000 });
+  check(
+    'Copy puts the one-time password on the system clipboard',
+    (await app.evaluate(({ clipboard }) => clipboard.readText())) === onboardedPassword,
+  );
+  check(
+    'Copy shows a toast and no "could not copy" message',
+    (await win.getByText('Password copied to the clipboard').isVisible()) &&
+      (await win.getByText(/Could not copy automatically/).count()) === 0,
+  );
+  await win.screenshot({ path: path.join(SHOTS, '6b-copied.png') });
+  const stillDenied = await win.evaluate(async () => {
+    const denied = async (run) => {
+      try {
+        await run();
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    return {
+      clipboardRead: await denied(() => navigator.clipboard.readText()),
+      geolocation: await new Promise((resolve) =>
+        navigator.geolocation.getCurrentPosition(
+          () => resolve(false),
+          () => resolve(true),
+          { timeout: 3000 },
+        ),
+      ),
+      notifications: (await Notification.requestPermission()) === 'denied',
+    };
+  });
+  check(
+    'reading the clipboard, location and notifications are still refused',
+    stillDenied.clipboardRead && stillDenied.geolocation && stillDenied.notifications,
+  );
+  await app.evaluate(({ clipboard }) => clipboard.clear()); // do not leave the password behind
+
+  await win.getByRole('button', { name: 'Onboard another' }).click();
+  await win.getByLabel('First name').waitFor({ timeout: 5000 });
+  check(
+    '"Onboard another" clears the form and the password',
+    (await win.getByLabel('First name').inputValue()) === '' &&
+      !(await win.locator('body').innerText()).includes(onboardedPassword),
+  );
+
+  if (HAS_DATABASE) {
+    onboarding.failNextRoleMapping = true;
+    await fillOnboardForm('second.hire', 'second.hire@example.com');
+    await win.getByText('Onboarding is not finished').waitFor({ timeout: 15000 });
+    const partialPassword = (await win.getByLabel('Temporary password').innerText()).trim();
+    check(
+      'a failed step shows the partial screen with the password still visible',
+      /^[A-Za-z0-9]{16}$/.test(partialPassword) && (await win.getByText('Failed').isVisible()),
+    );
+    await win.screenshot({ path: path.join(SHOTS, '7-partial.png') });
+    const secondUser = onboarding.created.find((c) => c.body.username === 'second.hire');
+    const groupPutsBefore = onboarding.groupPuts.filter((g) => g.userId === secondUser?.id).length;
+
+    await win.getByRole('button', { name: 'Retry' }).click();
+    await win.getByText('Employee onboarded').waitFor({ timeout: 15000 });
+    check(
+      'retry finishes the remaining step and skips the one that was already done',
+      onboarding.roleMappingPosts.some((r) => r.userId === secondUser?.id) &&
+        onboarding.groupPuts.filter((g) => g.userId === secondUser?.id).length ===
+          groupPutsBefore &&
+        groupPutsBefore === 1,
+    );
+    check(
+      'the password stays visible after a retry',
+      (await win.getByLabel('Temporary password').innerText()).trim() === partialPassword,
+    );
+    check(
+      'the user was never deleted or created twice',
+      onboarding.created.filter((c) => c.body.username === 'second.hire').length === 1,
+    );
+    await win.getByRole('button', { name: 'Onboard another' }).click();
+    await win.getByLabel('First name').waitFor({ timeout: 5000 });
+  } else {
+    console.log(
+      'SKIP  retry scenario: no scratch database (run "pnpm test:e2e" with TEST_DATABASE_URL set)',
+    );
+  }
 
   await win.getByRole('button', { name: 'Sign out' }).click();
   await win.getByRole('button', { name: 'Sign in' }).waitFor({ timeout: 10000 });
@@ -431,6 +727,10 @@ try {
 const apiText = apiLogs.join('');
 const leaked = issuedAccessTokens.some((t) => apiText.includes(t.slice(20, 80)));
 check('API logs never contain a token', !leaked);
+check(
+  'API logs never contain the temporary password',
+  onboardedPassword !== '' && !apiText.includes(onboardedPassword),
+);
 const ownProbe = /Executing inline script violates/;
 const unexpectedLogs = consoleLogs.filter((l) => !ownProbe.test(l));
 const csp = unexpectedLogs.filter((l) => /content security policy|refused to/i.test(l));

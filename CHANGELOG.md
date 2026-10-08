@@ -32,6 +32,22 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- **Onboarding, part 1** (ADR 0010). Desktop: a real Onboard screen (first name, last name, email,
+  username, department, role) with a success screen that shows a one-time temporary password, and a
+  partial-failure screen with Retry. API: `GET /onboarding/options`, `POST /onboarding` (`201`, or
+  `207` when a step after creating the user fails) and `POST /onboarding/:subjectId/retry`, all limited
+  to 20 requests a minute per IP and sent with `Cache-Control: no-store`. Every step writes an audit
+  row. The retry only works for a user the same admin created in the last 24 hours.
+  - Identity: `IdentityProvider` gains `listGroups` and an exact `findUsers`, and `createUser` accepts
+    `emailVerified` and a temporary `initialPassword`. A new in-memory provider for tests runs the
+    same contract as the adapter.
+  - Configuration: new optional `AUTH_SUPER_ADMIN_ROLE` (default `super-admin`). Only that role can
+    assign `admin`. The desktop reads it the same way as `AUTH_ADMIN_ROLES`.
+  - Desktop: the bridge gains `api.onboarding.create` and `api.onboarding.retry`. HTTP `207` is a
+    success with a body, and API errors carry their `code`.
+  - API error codes `username_exists` and `email_exists` (`409`).
+  - End-to-end test: an onboarding scenario. `pnpm test:e2e` creates a throwaway database when
+    `TEST_DATABASE_URL` points at a PostgreSQL server, and drops it afterwards.
 - Monorepo with pnpm workspaces and Turborepo: `apps/desktop`, `apps/api`, `packages/shared`,
   `packages/keycloak-client`.
 - Desktop: setup wizard, OIDC login (Authorization Code + PKCE, system browser, loopback redirect),

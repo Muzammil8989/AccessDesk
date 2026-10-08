@@ -17,9 +17,10 @@ provider-neutral interface ([ADR 0007](docs/adr/0007-identity-provider-interface
 [here](docs/keycloak-setup.md).
 
 > [!NOTE]
-> **Status: early development (v0.1.0).** Login, a protected app shell, the Employees list and the
-> first-run setup wizard work end to end. Onboarding, offboarding and the remaining screens are
-> placeholders. See [Project status](#project-status).
+> **Status: early development (v0.1.0).** Login, a protected app shell, the Employees list, the
+> first-run setup wizard and the first part of Onboarding (create an employee, department group, role
+> and a one-time temporary password) work end to end against test doubles. Offboarding and the
+> remaining screens are placeholders. See [Project status](#project-status).
 
 ## Contents
 
@@ -98,6 +99,7 @@ URL. These are public values saved locally. No secret is ever asked for.
 | `IDENTITY_CLIENT_ID`    | Yes      | `accessdesk`                                    | Public client used by the desktop app                          |
 | `IDENTITY_AUDIENCE`     | No       | `IDENTITY_CLIENT_ID`                            | Expected `aud` claim of access tokens                          |
 | `AUTH_ADMIN_ROLES`      | No       | `super-admin,hr-admin`                          | Comma-separated roles that may use AccessDesk (any one)        |
+| `AUTH_SUPER_ADMIN_ROLE` | No       | `super-admin`                                   | The one role that may give someone the `admin` role            |
 | `AUTH_ROLES_CLAIM_PATH` | No       | `realm_access.roles`                            | Dot-separated path to the role names in the access token       |
 | `DATABASE_URL`          | Yes      | local PostgreSQL                                | Connection string for AccessDesk's own database                |
 | `POSTGRES_PASSWORD`     | No       | `change-me`                                     | Password for the Docker database. Change it outside local use  |
@@ -107,7 +109,8 @@ URL. These are public values saved locally. No secret is ever asked for.
 | `RATE_LIMIT_PER_MINUTE` | No       | `300`                                           | Requests per client IP per minute before the API answers `429` |
 | `LOG_LEVEL`             | No       | `info`                                          | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` |
 
-The API and the desktop app both read `AUTH_ADMIN_ROLES` and `AUTH_ROLES_CLAIM_PATH`, from this same
+The API and the desktop app both read `AUTH_ADMIN_ROLES`, `AUTH_SUPER_ADMIN_ROLE` and
+`AUTH_ROLES_CLAIM_PATH`, from this same
 `.env` and with the same validation, so the UI and the API cannot disagree about who is an admin. The
 desktop settings wizard asks only for the issuer URL, the client ID and the API URL.
 
@@ -207,16 +210,23 @@ tree and the testing conventions are in the [development guide](docs/development
 - Employees list with search, pagination, and loading, empty and error states (desktop to API to
   identity provider)
 - API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id`
+- Onboarding, part 1 ([ADR 0010](docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md)):
+  the Onboard screen and `GET /onboarding/options`, `POST /onboarding` and
+  `POST /onboarding/:subjectId/retry`. It creates the user, adds them to a department group, assigns
+  `member`, `manager` or `admin` (`admin` only for the super-admin role) and returns a one-time
+  temporary password. Each step is audited, a partial failure can be retried, and nothing is rolled
+  back. **Tested against fakes only; not yet run against a real identity provider.**
 - PostgreSQL schema, first migration and seed
 - `packages/identity` (the provider-neutral interface) and `packages/identity-keycloak` (its adapter),
   with unit and contract tests (mocked `fetch`)
 
 **Not built yet**
 
-- Onboard, Offboard, Access Review and Audit Log screens (placeholders today)
+- Offboard, Access Review and Audit Log screens (placeholders today)
+- The rest of Onboarding: checklists, templates, manager, start date, bulk import and email
 - Employee detail and edit screens (the API route for one employee exists)
-- API routes for the identity provider's write functions (create, disable, end sessions, groups,
-  roles). The functions are implemented and tested, but no route calls them yet.
+- API routes for the identity provider's other write functions (disable, end sessions, remove groups
+  and roles). The functions are implemented and tested, but no route calls them yet.
 - Identity providers other than the first one. The API depends on an interface, so one can be added
   ([ADR 0009](docs/adr/0009-provider-neutral-naming.md)), but only one adapter exists.
 - Scheduled jobs. `apps/api/src/infra/jobs.ts` is a stub.

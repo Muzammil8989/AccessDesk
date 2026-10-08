@@ -11,7 +11,10 @@ These are enforced in code and covered by tests where possible. Report vulnerabi
 3. **Electron hardening:** `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. A strict
    Content Security Policy (production: scripts and styles from `self` only, no network access from the
    page). Navigation is limited to the app's own origin, new windows are denied, webviews are blocked,
-   and all permission requests are refused. The preload exposes a small typed API, and IPC handlers
+   and every permission request is refused except one: writing text to the clipboard (Chromium's
+   `clipboard-sanitized-write`), from the app's own top-level page only, so that "Copy" works on the
+   one-time password. Reading the clipboard, location, notifications and the rest stay denied. The
+   preload exposes a small typed API, and IPC handlers
    accept calls from the app's own top-level page only. In production the UI is served from a custom
    `app://` scheme so that the CSP and origin checks apply.
 4. **Tokens are stored with Electron `safeStorage`** (Windows DPAPI, macOS Keychain, Linux libsecret),
@@ -38,6 +41,7 @@ These are enforced in code and covered by tests where possible. Report vulnerabi
 | Encrypted tokens      | `apps/desktop/src/main/store/tokenStore.ts`                  | `apps/desktop/test/unit/main/store/store.test.ts`                    |
 | JWT check, role guard | `apps/api/src/plugins/auth.ts`                               | `apps/api/test/integration/auth.test.ts`                             |
 | Forwarded admin token | `apps/api/src/modules/employees/employees.routes.ts`         | `apps/api/test/integration/employees.test.ts`                        |
+| One-time password     | `apps/api/src/modules/onboarding/` (ADR 0010)                | `apps/api/test/integration/onboarding.test.ts`                       |
 | Input validation      | `packages/shared/src/`                                       | `packages/shared/test/unit/`                                         |
 
 ## Role-based visibility

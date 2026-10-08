@@ -59,8 +59,8 @@ of the code only knows a provider-neutral interface.
    The redirect is a loopback listener `http://127.0.0.1:<random port>/callback` run by the Electron
    main process.
 3. **Electron hardening:** `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, strict
-   Content Security Policy, navigation and new windows blocked, webviews blocked, all permission
-   requests refused, a minimal typed preload API, IPC handlers that answer only the app's own top-level
+   Content Security Policy, navigation and new windows blocked, webviews blocked, every permission
+   request refused except clipboard write for the app's own page, a minimal typed preload API, IPC handlers that answer only the app's own top-level
    page.
 4. **Tokens are stored with Electron `safeStorage`** (OS secure storage), never in plain files or
    `localStorage`. Without secure storage they stay in memory only. The renderer never sees a token.
@@ -213,11 +213,13 @@ them yet.
   - `security.ts`: `app://accessdesk` origin helpers, CSP builder (production: `default-src 'none'`,
     scripts and styles from `self`, `connect-src 'none'`), path-traversal-safe file resolver.
   - `index.ts`, `window.ts`, `ipc.ts`: Electron wiring: single instance lock, sandbox, `app://` protocol
-    handler that adds the CSP header, dev-server CSP, permission denial, trusted-sender checks on IPC.
-- **Preload** exposes `window.accessdesk` with `settings`, `auth` and `api.get` only.
+    handler that adds the CSP header, dev-server CSP, permission denial (only clipboard write is
+    allowed, for the app's own page), trusted-sender checks on IPC.
+- **Preload** exposes `window.accessdesk` with `settings`, `auth` and `api`: `api.get` plus the two
+  onboarding write calls, `api.onboarding.create` and `api.onboarding.retry` (ADR 0010).
 - **Renderer.** Hash routes: `/setup` (first-run wizard), `/login`, `/no-access`, and under the app
   layout `/employees`, `/onboard`, `/offboard`, `/access-review`, `/audit-log`, `/settings`. Only
-  Employees and Settings do real work, the rest are placeholders. Employees has debounced search,
+  Employees, Onboard (part 1) and Settings do real work, the rest are placeholders. Employees has debounced search,
   pagination, loading, empty and error states, and retries only network and 5xx errors. The settings
   form (Issuer URL, Client ID, AccessDesk API URL; no realm field) is validated with Zod and has a
   "Test connection" button, and the settings page card is titled "Identity provider connection". The

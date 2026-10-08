@@ -18,7 +18,9 @@ admin (`AUTH_ADMIN_ROLES`) and where roles are in the token (`AUTH_ROLES_CLAIM_P
 same `.env` variables as the API, validated by the same code, so the UI and the API agree.
 
 The renderer is sandboxed and never sees a token. It asks the main process for data through the preload
-bridge, and the main process adds the bearer token. See [docs/security.md](../../docs/security.md).
+bridge, and the main process adds the bearer token. The bridge has `api.get` for reads and, for writes,
+only `api.onboarding.create` and `api.onboarding.retry`: the main process builds those two paths itself
+and validates the input. See [docs/security.md](../../docs/security.md).
 
 | Command (from the repo root)             | What it does                              |
 | ---------------------------------------- | ----------------------------------------- |

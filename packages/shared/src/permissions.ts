@@ -1,6 +1,7 @@
 export const FEATURES = [
   'employees',
   'onboard',
+  'onboard-assign-admin',
   'offboard',
   'access-review',
   'audit-log',
@@ -8,11 +9,12 @@ export const FEATURES = [
 ] as const;
 export type Feature = (typeof FEATURES)[number];
 
-export type FeatureAccess = 'admin';
+export type FeatureAccess = 'admin' | 'super-admin';
 
 export const FEATURE_ACCESS: Record<Feature, FeatureAccess> = {
   employees: 'admin',
   onboard: 'admin',
+  'onboard-assign-admin': 'super-admin',
   offboard: 'admin',
   'access-review': 'admin',
   'audit-log': 'admin',
@@ -27,9 +29,12 @@ export function canAccess(
   roles: readonly string[],
   feature: Feature,
   adminRoles: readonly string[],
+  superAdminRole?: string,
 ): boolean {
   switch (FEATURE_ACCESS[feature]) {
     case 'admin':
       return hasAdminAccess(roles, adminRoles);
+    case 'super-admin':
+      return superAdminRole !== undefined && roles.includes(superAdminRole);
   }
 }

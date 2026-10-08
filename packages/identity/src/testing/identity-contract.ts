@@ -73,6 +73,63 @@ export function runIdentityProviderContract(
         );
       });
 
+      it('creates a user with a verified email and a temporary initial password', async () => {
+        const { provider } = await create();
+        const subjectId = await provider.createUser({
+          username: 'ann',
+          email: 'ann@example.com',
+          emailVerified: true,
+          initialPassword: { value: 'Temp-pass-123', temporary: true },
+        });
+
+        expect(await provider.getUser(subjectId)).toMatchObject({
+          username: 'ann',
+          emailVerified: true,
+          enabled: true,
+        });
+      });
+
+      it('rejects a duplicate username with a 409 IdentityProviderError', async () => {
+        const { provider } = await create();
+        await provider.createUser({ username: 'ann', email: 'ann@example.com' });
+        const error = await provider
+          .createUser({ username: 'ann', email: 'other@example.com' })
+          .catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(IdentityProviderError);
+        expect((error as IdentityProviderError).status).toBe(409);
+      });
+
+      it('rejects a duplicate email with a 409 IdentityProviderError', async () => {
+        const { provider } = await create();
+        await provider.createUser({ username: 'ann', email: 'ann@example.com' });
+        const error = await provider
+          .createUser({ username: 'bob', email: 'ann@example.com' })
+          .catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(IdentityProviderError);
+        expect((error as IdentityProviderError).status).toBe(409);
+      });
+
+      it('finds users by exact username or exact email, never by a fragment', async () => {
+        const { provider } = await create();
+        const annId = await provider.createUser({ username: 'ann', email: 'ann@example.com' });
+        await provider.createUser({ username: 'anna-marie', email: 'anna@example.com' });
+
+        const byUsername = await provider.findUsers({ username: 'ann', exact: true });
+        const byEmail = await provider.findUsers({ email: 'ann@example.com', exact: true });
+        const byFragment = await provider.findUsers({ username: 'an', exact: true });
+        const byMissingEmail = await provider.findUsers({
+          email: 'nobody@example.com',
+          exact: true,
+        });
+
+        expect(byUsername.map((u) => u.subjectId)).toEqual([annId]);
+        expect(byEmail.map((u) => u.subjectId)).toEqual([annId]);
+        expect(byFragment).toEqual([]);
+        expect(byMissingEmail).toEqual([]);
+      });
+
       it('disables a user without changing anything else', async () => {
         const { provider } = await create();
         const subjectId = await provider.createUser({ username: 'ann', email: 'ann@example.com' });
@@ -98,6 +155,25 @@ export function runIdentityProviderContract(
     });
 
     describe('groups', () => {
+      it('lists the top-level groups with id, name and path', async () => {
+        const fixture = await create();
+        const engineeringId = await fixture.seedGroup('Engineering');
+        const salesId = await fixture.seedGroup('Sales');
+
+        const listed = await fixture.provider.listGroups();
+
+        expect([...listed].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+          { id: engineeringId, name: 'Engineering', path: '/Engineering' },
+          { id: salesId, name: 'Sales', path: '/Sales' },
+        ]);
+      });
+
+      it('lists no groups when none exist', async () => {
+        const { provider } = await create();
+
+        expect(await provider.listGroups()).toEqual([]);
+      });
+
       it('adds a user to a group and removes them again', async () => {
         const fixture = await create();
         const { provider } = fixture;

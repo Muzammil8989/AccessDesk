@@ -5,8 +5,11 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { JWTVerifyGetKey } from 'jose';
 import type { Config } from './config';
 import type { IdentityProviderFactory } from './infra/identity';
+import type { AuditRepository } from './modules/audit/audit.repository';
 import { employeeRoutes } from './modules/employees/employees.routes';
 import { healthRoutes } from './modules/health/health.routes';
+import { onboardingRoutes } from './modules/onboarding/onboarding.routes';
+import { generateTemporaryPassword } from './modules/onboarding/temporary-password';
 import type { TemplateRepository } from './modules/templates/templates.repository';
 import { templateRoutes } from './modules/templates/templates.routes';
 import { registerAuth } from './plugins/auth';
@@ -15,10 +18,14 @@ import { registerErrorHandler } from './plugins/error-handler';
 export interface AppDeps {
   config: Config;
   templates: TemplateRepository;
+  audit: AuditRepository;
   identityFor: IdentityProviderFactory;
   checkDatabase: () => Promise<void>;
   keyResolver?: JWTVerifyGetKey;
   fetch?: typeof globalThis.fetch;
+  clock?: () => Date;
+  generatePassword?: () => string;
+  logStream?: NodeJS.WritableStream;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -27,9 +34,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     logger: {
       level: config.logLevel,
       redact: ['req.headers.authorization', 'req.headers.cookie'],
-      transport: ['production', 'test'].includes(process.env.NODE_ENV ?? '')
-        ? undefined
-        : { target: 'pino-pretty' },
+      stream: deps.logStream,
+      transport:
+        deps.logStream || ['production', 'test'].includes(process.env.NODE_ENV ?? '')
+          ? undefined
+          : { target: 'pino-pretty' },
     },
     trustProxy: config.trustProxy,
     bodyLimit: 100 * 1024,
@@ -62,6 +71,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   healthRoutes(app, { checkDatabase: deps.checkDatabase });
   templateRoutes(app, deps.templates);
   employeeRoutes(app, { identityFor: deps.identityFor });
+  onboardingRoutes(app, {
+    identityFor: deps.identityFor,
+    audit: deps.audit,
+    clock: deps.clock ?? (() => new Date()),
+    generatePassword: deps.generatePassword ?? generateTemporaryPassword,
+    superAdminRole: config.superAdminRole,
+  });
 
   return app;
 }

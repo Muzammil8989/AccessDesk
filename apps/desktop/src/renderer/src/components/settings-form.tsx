@@ -1,13 +1,14 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { appSettingsSchema, type AppSettings } from '@accessdesk/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import type { z } from 'zod';
 import type { ConnectionTestResult } from '../../../shared/ipc';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
+import { toast } from '@/lib/toast';
 
 type FormInput = z.input<typeof appSettingsSchema>;
 
@@ -39,6 +40,7 @@ export function SettingsForm({ initial, submitLabel, onSaved }: SettingsFormProp
     const result = await window.accessdesk.settings.save(values);
     if (!result.ok) return setSaveError(result.message);
     await queryClient.invalidateQueries();
+    toast.success('Settings saved');
     onSaved?.(result.settings);
   }
 
@@ -82,18 +84,14 @@ export function SettingsForm({ initial, submitLabel, onSaved }: SettingsFormProp
       />
 
       {testResult && (
-        <p
-          role="status"
-          className={`flex items-center gap-2 text-sm ${testResult.ok ? 'text-success' : 'text-destructive'}`}
-        >
-          {testResult.ok ? <CheckCircle2 className="size-4" /> : <XCircle className="size-4" />}
-          {testResult.message}
-        </p>
+        <Alert variant={testResult.ok ? 'success' : 'destructive'} role="status">
+          <AlertDescription className="mt-0 text-foreground">{testResult.message}</AlertDescription>
+        </Alert>
       )}
       {saveError && (
-        <p role="alert" className="text-sm text-destructive">
-          {saveError}
-        </p>
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="mt-0 text-foreground">{saveError}</AlertDescription>
+        </Alert>
       )}
 
       <div className="flex gap-3">
