@@ -30,22 +30,37 @@ export interface CountUsersParams {
   search?: string;
 }
 
+export interface FindUsersParams {
+  username?: string;
+  email?: string;
+  exact: true;
+}
+
+export interface InitialPassword {
+  value: string;
+  temporary: boolean;
+}
+
 export interface CreateUserInput {
   username: string;
   email?: string;
   firstName?: string;
   lastName?: string;
   enabled?: boolean;
+  emailVerified?: boolean;
+  initialPassword?: InitialPassword;
 }
 
 export interface IdentityProvider {
   listUsers(params?: ListUsersParams): Promise<IdentityUser[]>;
   countUsers(params?: CountUsersParams): Promise<number>;
+  findUsers(params: FindUsersParams): Promise<IdentityUser[]>;
   getUser(subjectId: string): Promise<IdentityUser>;
   createUser(input: CreateUserInput): Promise<string>;
   disableUser(subjectId: string): Promise<void>;
   endAllSessions(subjectId: string): Promise<void>;
 
+  listGroups(): Promise<IdentityGroup[]>;
   getUserGroups(subjectId: string): Promise<IdentityGroup[]>;
   addUserToGroup(subjectId: string, groupId: string): Promise<void>;
   removeUserFromGroup(subjectId: string, groupId: string): Promise<void>;

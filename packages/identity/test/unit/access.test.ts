@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ADMIN_ROLES,
   DEFAULT_ROLES_CLAIM_PATH,
+  DEFAULT_SUPER_ADMIN_ROLE,
   loadAccessPolicy,
   readRolesFromClaims,
 } from '../../src/index';
@@ -10,8 +11,21 @@ describe('loadAccessPolicy', () => {
   it('defaults to the standard admin roles and claim path', () => {
     expect(loadAccessPolicy({})).toEqual({
       adminRoles: [...DEFAULT_ADMIN_ROLES],
+      superAdminRole: DEFAULT_SUPER_ADMIN_ROLE,
       rolesClaimPath: DEFAULT_ROLES_CLAIM_PATH,
     });
+  });
+
+  it('reads a custom super-admin role, ignoring spaces around it', () => {
+    expect(loadAccessPolicy({ AUTH_SUPER_ADMIN_ROLE: ' it-owner ' }).superAdminRole).toBe(
+      'it-owner',
+    );
+  });
+
+  it.each(['', '   '])('rejects a blank super-admin role (%j)', (value) => {
+    expect(() => loadAccessPolicy({ AUTH_SUPER_ADMIN_ROLE: value })).toThrow(
+      /^Invalid access configuration: AUTH_SUPER_ADMIN_ROLE$/,
+    );
   });
 
   it('reads custom values, ignoring spaces around role names', () => {
@@ -22,6 +36,7 @@ describe('loadAccessPolicy', () => {
       }),
     ).toEqual({
       adminRoles: ['it-admin', 'people-ops'],
+      superAdminRole: DEFAULT_SUPER_ADMIN_ROLE,
       rolesClaimPath: 'resource_access.accessdesk.roles',
     });
   });

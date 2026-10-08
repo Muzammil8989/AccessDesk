@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { SettingsForm } from '@/components/settings-form';
+import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { authQuery, settingsQuery } from '@/lib/session';
@@ -13,7 +14,10 @@ export function SettingsPage() {
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+      <PageHeader
+        title="Settings"
+        description="How AccessDesk reaches your identity provider, and who you are signed in as."
+      />
 
       <Card>
         <CardHeader>

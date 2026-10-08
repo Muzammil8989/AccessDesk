@@ -39,7 +39,7 @@ export class AuthService {
 
   async status(): Promise<AuthStatus> {
     const persistent = this.deps.tokenStore.persistent;
-    const adminRoles = this.deps.policy.adminRoles;
+    const { adminRoles, superAdminRole } = this.deps.policy;
     const tokens = await this.deps.tokenStore.load();
     const usable = tokens && (tokens.refreshToken !== null || tokens.expiresAt > this.now());
     if (!tokens || !usable) {
@@ -49,6 +49,7 @@ export class AuthService {
         displayName: null,
         roles: [],
         adminRoles,
+        superAdminRole,
         persistent,
       };
     }
@@ -59,6 +60,7 @@ export class AuthService {
       displayName: claims.name ?? null,
       roles: claims.roles,
       adminRoles,
+      superAdminRole,
       persistent,
     };
   }

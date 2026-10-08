@@ -14,6 +14,7 @@ const settings: AppSettings = {
 };
 const policy: AccessPolicy = {
   adminRoles: ['super-admin', 'hr-admin'],
+  superAdminRole: 'super-admin',
   rolesClaimPath: 'realm_access.roles',
 };
 
@@ -269,15 +270,21 @@ describe('roles and the access policy', () => {
     const token = jwt({ resource_access: { accessdesk: { roles: ['it-admin'] } } });
     const status = await signedInStatus(token, {
       adminRoles: ['it-admin'],
+      superAdminRole: 'it-owner',
       rolesClaimPath: 'resource_access.accessdesk.roles',
     });
-    expect(status).toMatchObject({ roles: ['it-admin'], adminRoles: ['it-admin'] });
+    expect(status).toMatchObject({
+      roles: ['it-admin'],
+      adminRoles: ['it-admin'],
+      superAdminRole: 'it-owner',
+    });
   });
 
   it('ignores roles at the default path when another path is configured', async () => {
     const token = jwt({ realm_access: { roles: ['hr-admin'] } });
     const status = await signedInStatus(token, {
       adminRoles: ['hr-admin'],
+      superAdminRole: 'super-admin',
       rolesClaimPath: 'resource_access.accessdesk.roles',
     });
     expect(status.roles).toEqual([]);
@@ -293,6 +300,7 @@ describe('roles and the access policy', () => {
     expect(await service.status()).toMatchObject({
       authenticated: false,
       adminRoles: policy.adminRoles,
+      superAdminRole: policy.superAdminRole,
     });
   });
 });

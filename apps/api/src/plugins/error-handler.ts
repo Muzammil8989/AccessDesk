@@ -1,6 +1,7 @@
 import { IdentityProviderError } from '@accessdesk/identity';
 import type { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
+import { AppError } from '../errors';
 
 const PASS_THROUGH_STATUSES = [401, 403, 404];
 
@@ -24,6 +25,9 @@ export function registerErrorHandler(app: FastifyInstance): void {
         error: 'bad_request',
         message: error.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; '),
       });
+    }
+    if (error instanceof AppError) {
+      return reply.code(error.statusCode).send({ error: error.code, message: error.message });
     }
     if (error instanceof IdentityProviderError) {
       const status = PASS_THROUGH_STATUSES.includes(error.status) ? error.status : 502;

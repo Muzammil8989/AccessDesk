@@ -80,6 +80,49 @@ describe('Employees screen', () => {
     expect(await screen.findByText('No employees match “zzz”.')).toBeInTheDocument();
   });
 
+  it('offers a way out of a search that matches nobody', async () => {
+    installFakeApi({ apiGet: async () => page([]) });
+    renderRoutes(routes, '/employees');
+
+    const box = await screen.findByRole('searchbox', { name: 'Search employees' });
+    await userEvent.type(box, 'zzz');
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear search' }));
+
+    expect(box).toHaveValue('');
+    expect(await screen.findByText('No employees found.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+  });
+
+  it('says where you are when there is more than one page', async () => {
+    installFakeApi({ apiGet: async () => page([employee(1)], 41, 0) });
+    renderRoutes(routes, '/employees');
+
+    expect(await screen.findByText('Page 1 of 3')).toBeInTheDocument();
+  });
+
+  it('does not show a page count when everything fits on one page', async () => {
+    installFakeApi({ apiGet: async () => page([employee(1)]) });
+    renderRoutes(routes, '/employees');
+
+    await screen.findByText('Showing 1–1 of 1');
+    expect(screen.queryByText(/^Page \d+ of \d+$/)).not.toBeInTheDocument();
+  });
+
+  it('marks status with an icon as well as colour, and falls back to the username for the avatar', async () => {
+    installFakeApi({
+      apiGet: async () =>
+        page([employee(1), employee(2, { enabled: false, firstName: null, lastName: null })]),
+    });
+    renderRoutes(routes, '/employees');
+
+    const table = await screen.findByRole('table');
+    await within(table).findByText('Active');
+    expect(within(table).getByText('Active').querySelector('svg')).not.toBeNull();
+    expect(within(table).getByText('Disabled').querySelector('svg')).not.toBeNull();
+    expect(within(table).getByText('U1')).toBeInTheDocument();
+    expect(within(table).getByText('US')).toBeInTheDocument();
+  });
+
   it('shows the server message and a link to Settings on a 403', async () => {
     installFakeApi({
       apiGet: async () => ({

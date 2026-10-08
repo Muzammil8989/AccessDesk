@@ -6,3 +6,4 @@ coverage
 pnpm-lock.yaml
 apps/api/src/generated
 apps/api/prisma/migrations
+.claude/skills

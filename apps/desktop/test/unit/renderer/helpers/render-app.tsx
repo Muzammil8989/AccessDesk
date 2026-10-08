@@ -25,6 +25,17 @@ export const adminAuth: AuthStatus = {
   displayName: 'Hana HR',
   roles: ['hr-admin', 'offline_access'],
   adminRoles: ['super-admin', 'hr-admin'],
+  superAdminRole: 'super-admin',
+  persistent: true,
+};
+
+export const superAdminAuth: AuthStatus = {
+  authenticated: true,
+  username: 'superadmin1',
+  displayName: 'Sam Super',
+  roles: ['super-admin', 'offline_access'],
+  adminRoles: ['super-admin', 'hr-admin'],
+  superAdminRole: 'super-admin',
   persistent: true,
 };
 
@@ -34,6 +45,7 @@ export const memberAuth: AuthStatus = {
   displayName: 'Member One',
   roles: ['offline_access', 'default-roles-company-platform'],
   adminRoles: ['super-admin', 'hr-admin'],
+  superAdminRole: 'super-admin',
   persistent: true,
 };
 
@@ -43,6 +55,7 @@ export const signedOut: AuthStatus = {
   displayName: null,
   roles: [],
   adminRoles: ['super-admin', 'hr-admin'],
+  superAdminRole: 'super-admin',
   persistent: true,
 };
 
@@ -50,6 +63,8 @@ export interface FakeApiOptions {
   settings?: AppSettings | null;
   auth?: AuthStatus;
   apiGet?: (path: string, query?: Record<string, string | number>) => Promise<ApiResponse>;
+  onboardingCreate?: (input: unknown) => Promise<ApiResponse>;
+  onboardingRetry?: (subjectId: string, input: unknown) => Promise<ApiResponse>;
   login?: () => Promise<LoginResult>;
   saveSettings?: (input: unknown) => Promise<SettingsSaveResult>;
   testConnection?: (input: unknown) => Promise<ConnectionTestResult>;
@@ -82,6 +97,16 @@ export function installFakeApi(options: FakeApiOptions = {}) {
         options.apiGet ??
           (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),
       ),
+      onboarding: {
+        create: vi.fn(
+          options.onboardingCreate ??
+            (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),
+        ),
+        retry: vi.fn(
+          options.onboardingRetry ??
+            (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),
+        ),
+      },
     },
   } satisfies AccessDeskApi;
 

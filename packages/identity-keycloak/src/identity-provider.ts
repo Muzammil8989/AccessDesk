@@ -46,12 +46,18 @@ export function createKeycloakIdentityProvider(options: IdentityProviderOptions)
       return (await api.listUsers(params)).map(mapUser);
     },
     countUsers: (params = {}) => api.countUsers(params),
+    async findUsers({ username, email }) {
+      return (await api.findUsersExact({ username, email })).map(mapUser);
+    },
     async getUser(subjectId) {
       return mapUser(await api.getUser(subjectId));
     },
     createUser: (input) => api.createUser(input),
     disableUser: (subjectId) => api.disableUser(subjectId),
     endAllSessions: (subjectId) => api.endAllSessions(subjectId),
+    async listGroups() {
+      return (await api.listGroups()).map(mapGroup);
+    },
     async getUserGroups(subjectId) {
       return (await api.getUserGroups(subjectId)).map(mapGroup);
     },

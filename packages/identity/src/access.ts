@@ -2,7 +2,14 @@ import { z } from 'zod';
 
 export const DEFAULT_ADMIN_ROLES = ['super-admin', 'hr-admin'] as const;
 
+export const DEFAULT_SUPER_ADMIN_ROLE = 'super-admin';
+
 export const DEFAULT_ROLES_CLAIM_PATH = 'realm_access.roles';
+
+export const superAdminRoleSchema = z
+  .string()
+  .default(DEFAULT_SUPER_ADMIN_ROLE)
+  .pipe(z.string().trim().min(1));
 
 export const adminRolesSchema = z
   .string()
@@ -17,11 +24,13 @@ export const rolesClaimPathSchema = z
 
 export const accessPolicyEnvSchema = z.object({
   AUTH_ADMIN_ROLES: adminRolesSchema,
+  AUTH_SUPER_ADMIN_ROLE: superAdminRoleSchema,
   AUTH_ROLES_CLAIM_PATH: rolesClaimPathSchema,
 });
 
 export interface AccessPolicy {
   adminRoles: string[];
+  superAdminRole: string;
   rolesClaimPath: string;
 }
 
@@ -35,6 +44,7 @@ export function loadAccessPolicy(env: Record<string, string | undefined>): Acces
   }
   return {
     adminRoles: parsed.data.AUTH_ADMIN_ROLES,
+    superAdminRole: parsed.data.AUTH_SUPER_ADMIN_ROLE,
     rolesClaimPath: parsed.data.AUTH_ROLES_CLAIM_PATH,
   };
 }

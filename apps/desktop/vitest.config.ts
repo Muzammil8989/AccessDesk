@@ -10,8 +10,6 @@ export default defineConfig({
       exclude: [
         'src/main/index.ts',
         'src/main/window.ts',
-        'src/main/ipc.ts',
-        'src/preload/**',
         'src/renderer/src/main.tsx',
         'src/renderer/src/components/ui/**',
         'src/shared/**',

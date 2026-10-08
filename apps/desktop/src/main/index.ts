@@ -11,6 +11,7 @@ import {
   APP_ORIGIN,
   APP_SCHEME,
   buildCsp,
+  installPermissionHandlers,
   isAllowedNavigation,
   originOf,
   resolveAppFile,
@@ -79,10 +80,7 @@ function addDevServerCsp(origin: string): void {
 }
 
 void app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
-    callback(false),
-  );
-  session.defaultSession.setPermissionCheckHandler(() => false);
+  installPermissionHandlers(session.defaultSession, appOrigin);
 
   if (devServerOrigin) addDevServerCsp(devServerOrigin);
   else serveRendererFromAppScheme();
