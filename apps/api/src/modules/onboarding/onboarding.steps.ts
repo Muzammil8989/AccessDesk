@@ -1,5 +1,6 @@
 import type { IdentityProvider } from '@accessdesk/identity';
 import type { OnboardEmployee, OnboardableRole } from '@accessdesk/shared';
+import type { ChecklistRepository } from '../checklists/checklists.repository';
 import type { OnboardingStep, StepContext } from './onboarding.runner';
 
 export interface Department {
@@ -67,5 +68,36 @@ export function assignRoleStep(
     satisfied,
     details: () => ({ role }),
     run: async (context) => identity.addUserRoles(requireSubject(context), [role]),
+  };
+}
+
+export interface ChecklistTask {
+  title: string;
+  description: string | null;
+}
+
+export interface CreateChecklistStepOptions {
+  checklists: Pick<ChecklistRepository, 'create'>;
+  templateId: string;
+  tasks: readonly ChecklistTask[];
+  actorId: string;
+  now: () => Date;
+  satisfied: boolean;
+}
+
+export function createChecklistStep(options: CreateChecklistStepOptions): OnboardingStep {
+  const { checklists, templateId, tasks, actorId, now, satisfied } = options;
+  return {
+    name: 'create_checklist',
+    satisfied,
+    details: () => ({ templateId, taskCount: String(tasks.length) }),
+    run: async (context) =>
+      checklists.create({
+        subjectId: requireSubject(context),
+        templateId,
+        createdBy: actorId,
+        at: now(),
+        tasks: [...tasks],
+      }),
   };
 }

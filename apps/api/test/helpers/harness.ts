@@ -15,7 +15,9 @@ import type { Config } from '../../src/config';
 import { createIdentityProviderFactory } from '../../src/infra/identity';
 import type { AuditRepository } from '../../src/modules/audit/audit.repository';
 import type { TemplateRepository } from '../../src/modules/templates/templates.repository';
+import type { ChecklistRepository } from '../../src/modules/checklists/checklists.repository';
 import { InMemoryAuditRepository } from './in-memory-audit';
+import { InMemoryChecklistRepository } from './in-memory-checklists';
 
 export const ISSUER = 'http://idp.test/realms/company-platform';
 export const AUDIENCE = 'accessdesk';
@@ -120,6 +122,7 @@ export interface TestAppOptions {
   fetch?: typeof fetch;
   templates?: TemplateRepository;
   audit?: AuditRepository;
+  checklists?: ChecklistRepository;
   checkDatabase?: () => Promise<void>;
   config?: Partial<Config>;
   discoverKeys?: boolean;
@@ -135,6 +138,7 @@ export function buildTestApp(harness: AuthHarness, options: TestAppOptions = {})
     config,
     templates: options.templates ?? fakeTemplateRepository(),
     audit,
+    checklists: options.checklists ?? new InMemoryChecklistRepository(audit),
     clock: options.clock,
     generatePassword: options.generatePassword,
     logStream: options.logStream,

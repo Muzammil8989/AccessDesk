@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { IdentityProviderFactory } from '../../infra/identity';
 import { requireAuth } from '../../plugins/auth';
 import type { AuditRepository } from '../audit/audit.repository';
+import type { ChecklistRepository } from '../checklists/checklists.repository';
 import type { TemplateRepository } from '../templates/templates.repository';
 import { OnboardingService, type Caller } from './onboarding.service';
 
@@ -23,6 +24,7 @@ export interface OnboardingRouteDeps {
   identityFor: IdentityProviderFactory;
   audit: AuditRepository;
   templates: TemplateRepository;
+  checklists: ChecklistRepository;
   clock: () => Date;
   generatePassword: () => string;
   adminRoles: readonly string[];
@@ -35,6 +37,7 @@ export function onboardingRoutes(app: FastifyInstance, deps: OnboardingRouteDeps
       identity: deps.identityFor(requireAuth(request).token),
       audit: deps.audit,
       templates: deps.templates,
+      checklists: deps.checklists,
       clock: deps.clock,
       generatePassword: deps.generatePassword,
       adminRoles: deps.adminRoles,

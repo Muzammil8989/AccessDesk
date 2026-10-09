@@ -6,6 +6,7 @@ import { AppError } from '../../src/errors';
 import { OnboardingService, type Caller } from '../../src/modules/onboarding/onboarding.service';
 import { fakeTemplateRepository } from '../helpers/harness';
 import { InMemoryAuditRepository } from '../helpers/in-memory-audit';
+import { InMemoryChecklistRepository } from '../helpers/in-memory-checklists';
 
 const TEMPLATE_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e01';
 const PASSWORD = 'Pw-Secret-1234567';
@@ -76,10 +77,12 @@ function setup(options: SetupOptions = {}) {
 
   const audit = new InMemoryAuditRepository(() => NOW);
   const templates = fakeTemplateRepository(options.template ? [options.template] : []);
+  const checklists = new InMemoryChecklistRepository(audit, { [TEMPLATE_ID]: 'Developer' });
   const service = new OnboardingService({
     identity: options.wrap ? options.wrap(fake.provider) : fake.provider,
     audit,
     templates,
+    checklists,
     clock: () => NOW,
     generatePassword: () => PASSWORD,
     adminRoles: options.adminRoles ?? ['super-admin', 'hr-admin'],
@@ -100,7 +103,7 @@ function setup(options: SetupOptions = {}) {
     requestId: 'req-1',
     log: { warn: vi.fn(), error: vi.fn() },
   });
-  return { fake, audit, service, input, caller, engineeringId, salesId };
+  return { fake, audit, checklists, service, input, caller, engineeringId, salesId };
 }
 
 const statuses = (steps: { name: string; status: string }[]) =>
@@ -126,6 +129,7 @@ describe('applying a template', () => {
       { name: 'assign_role', status: 'done' },
       { name: 'template_add_to_group', status: 'done', label: '/Sales' },
       { name: 'template_assign_role', status: 'done', label: 'developer' },
+      { name: 'create_checklist', status: 'done' },
     ]);
     expect(s.fake.inspect(result.subjectId)).toMatchObject({
       groupIds: [s.engineeringId, s.salesId],
@@ -144,7 +148,9 @@ describe('applying a template', () => {
       ['onboarding.assign_role', 'SUCCESS', result.subjectId],
       ['onboarding.template_add_to_group', 'SUCCESS', result.subjectId],
       ['onboarding.template_assign_role', 'SUCCESS', result.subjectId],
+      ['onboarding.create_checklist', 'SUCCESS', result.subjectId],
     ]);
+    expect(s.audit.rows[5]?.details).toEqual({ templateId: TEMPLATE_ID, taskCount: '1' });
     expect(s.audit.rows[3]?.details).toEqual({
       templateId: TEMPLATE_ID,
       itemId: expect.any(String),
@@ -160,7 +166,7 @@ describe('applying a template', () => {
     expect(JSON.stringify(s.audit.rows)).not.toContain('ann@example.com');
   });
 
-  it('adds nothing for a template that has only manual tasks', async () => {
+  it('adds only the checklist for a template that has only manual tasks', async () => {
     const s = setup({ template: template([item('MANUAL_TASK', null)]) });
 
     const result = await s.service.onboard(s.input, s.caller());
@@ -169,6 +175,7 @@ describe('applying a template', () => {
       'create_user:done',
       'add_to_group:done',
       'assign_role:done',
+      'create_checklist:done',
     ]);
   });
 
@@ -244,6 +251,123 @@ describe('applying a template', () => {
     });
     expect(s.fake.callCount('createUser')).toBe(0);
     expect(s.audit.rows).toEqual([]);
+  });
+});
+
+describe('the checklist step', () => {
+  const withTasks = () =>
+    template([
+      item('GROUP_MEMBERSHIP', '/Sales'),
+      item('MANUAL_TASK', null, 'Order laptop'),
+      item('MANUAL_TASK', null, 'Security training'),
+    ]);
+  const retryInput = (s: ReturnType<typeof setup>) => ({
+    templateId: TEMPLATE_ID,
+    departmentGroupId: s.input.departmentGroupId,
+    role: s.input.role,
+  });
+
+  it('copies the manual tasks, in order, into one checklist for the new subject', async () => {
+    const s = setup({ template: withTasks() });
+
+    const result = await s.service.onboard(s.input, s.caller(['hr-admin'], 'admin-7'));
+
+    expect(s.checklists.rows).toHaveLength(1);
+    expect(s.checklists.rows[0]).toMatchObject({
+      subjectId: result.subjectId,
+      templateId: TEMPLATE_ID,
+      createdBy: 'admin-7',
+      status: 'open',
+      items: [
+        { title: 'Order laptop', position: 0, status: 'pending' },
+        { title: 'Security training', position: 1, status: 'pending' },
+      ],
+    });
+  });
+
+  it('stores nothing about the person: no name, email, username or password', async () => {
+    const s = setup({ template: withTasks() });
+
+    await s.service.onboard(s.input, s.caller());
+
+    const stored = JSON.stringify(s.checklists.rows);
+    for (const secret of ['Ann', 'Lee', 'ann@example.com', 'ann.lee', PASSWORD]) {
+      expect(stored).not.toContain(secret);
+    }
+  });
+
+  it('adds no step and creates no checklist without a template or without manual tasks', async () => {
+    const none = setup();
+    const noTasks = setup({ template: template([item('ROLE', 'developer')]) });
+
+    const a = await none.service.onboard({ ...none.input, templateId: undefined }, none.caller());
+    const b = await noTasks.service.onboard(noTasks.input, noTasks.caller());
+
+    expect(a.steps.map((step) => step.name)).not.toContain('create_checklist');
+    expect(b.steps.map((step) => step.name)).not.toContain('create_checklist');
+    expect(none.checklists.rows).toEqual([]);
+    expect(noTasks.checklists.rows).toEqual([]);
+  });
+
+  it('is skipped on retry once the checklist exists, and never makes a second one', async () => {
+    const s = setup({ template: withTasks() });
+    const first = await s.service.onboard(s.input, s.caller());
+
+    const again = await s.service.retry(first.subjectId, retryInput(s), s.caller());
+
+    expect(again.steps.at(-1)).toEqual({
+      name: 'create_checklist',
+      status: 'skipped',
+      message: 'Already done',
+    });
+    expect(s.checklists.rows).toHaveLength(1);
+  });
+
+  it('fails as a partial result when the checklist cannot be saved, and Retry creates it', async () => {
+    const s = setup({ template: withTasks() });
+    s.checklists.failCreate = true;
+
+    const first = await s.service.onboard(s.input, s.caller());
+
+    expect(first.status).toBe('partial');
+    expect(first.steps.at(-1)).toEqual({
+      name: 'create_checklist',
+      status: 'failed',
+      message: 'This step failed unexpectedly.',
+    });
+    expect(s.audit.rows.at(-1)).toMatchObject({
+      action: 'onboarding.create_checklist',
+      outcome: 'FAILURE',
+    });
+    s.checklists.failCreate = false;
+
+    const retried = await s.service.retry(first.subjectId, retryInput(s), s.caller());
+
+    expect(retried.status).toBe('complete');
+    expect(retried.steps.filter((step) => step.status === 'done')).toEqual([
+      { name: 'create_checklist', status: 'done' },
+    ]);
+    expect(s.checklists.rows).toHaveLength(1);
+  });
+
+  it('waits for the earlier steps: a failed template step leaves it not run until Retry', async () => {
+    const s = setup({
+      template: withTasks(),
+      wrap: (provider) => failOnCall(provider, 'addUserToGroup', 2),
+    });
+
+    const first = await s.service.onboard(s.input, s.caller());
+
+    expect(statuses(first.steps).slice(-2)).toEqual([
+      'template_add_to_group:failed',
+      'create_checklist:skipped',
+    ]);
+    expect(s.checklists.rows).toEqual([]);
+
+    const retried = await s.service.retry(first.subjectId, retryInput(s), s.caller());
+
+    expect(retried.status).toBe('complete');
+    expect(s.checklists.rows).toHaveLength(1);
   });
 });
 

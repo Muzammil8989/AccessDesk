@@ -12,6 +12,7 @@ import {
 } from '@accessdesk/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { AuditReader, AuditWriter } from '../audit/audit.repository';
+import type { ChecklistRepository } from '../checklists/checklists.repository';
 import type { TemplateRepository } from '../templates/templates.repository';
 import { createAuditingObserver, ONBOARDING_AUDIT_ACTIONS } from './onboarding.audit';
 import { onboardingErrors } from './onboarding.errors';
@@ -19,6 +20,7 @@ import { runSteps, type OnboardingStep } from './onboarding.runner';
 import {
   addToGroupStep,
   assignRoleStep,
+  createChecklistStep,
   createUserStep,
   existingUserStep,
   requireSubject,
@@ -32,6 +34,7 @@ export interface OnboardingServiceDeps {
   identity: IdentityProvider;
   audit: AuditWriter & AuditReader;
   templates: Pick<TemplateRepository, 'findById'>;
+  checklists: Pick<ChecklistRepository, 'create' | 'exists'>;
   clock: () => Date;
   generatePassword: () => string;
   adminRoles: readonly string[];
@@ -86,6 +89,7 @@ export class OnboardingService {
         ...(template
           ? templateSteps({ identity, template, groups, department, role: input.role })
           : []),
+        ...this.checklistSteps(template, caller, false),
       ],
       context,
       this.observerFor(caller),
@@ -146,6 +150,7 @@ export class OnboardingService {
             assignedRoles: roles,
           })
         : []),
+      ...this.checklistSteps(template, caller, await this.deps.checklists.exists(subjectId)),
     ];
     const outcome = await runSteps(steps, { subjectId }, this.observerFor(caller));
 
@@ -154,6 +159,27 @@ export class OnboardingService {
       subjectId,
       steps: outcome.results,
     };
+  }
+
+  private checklistSteps(
+    template: Template | null,
+    caller: Pick<Caller, 'actorId'>,
+    satisfied: boolean,
+  ): OnboardingStep[] {
+    const tasks = (template?.items ?? [])
+      .filter((item) => item.kind === 'MANUAL_TASK')
+      .map(({ title, description }) => ({ title, description }));
+    if (!template || tasks.length === 0) return [];
+    return [
+      createChecklistStep({
+        checklists: this.deps.checklists,
+        templateId: template.id,
+        tasks,
+        actorId: caller.actorId,
+        now: this.deps.clock,
+        satisfied,
+      }),
+    ];
   }
 
   private assertRoleAllowed(caller: Pick<Caller, 'roles'>, role: string): void {

@@ -102,6 +102,7 @@ describe('POST /onboarding with a template', () => {
       { name: 'assign_role', status: 'done' },
       { name: 'template_add_to_group', status: 'done', label: '/Sales' },
       { name: 'template_assign_role', status: 'done', label: 'developer' },
+      { name: 'create_checklist', status: 'done' },
     ]);
     expect(s.fake.inspect(res.json().subjectId)).toMatchObject({
       groupIds: [s.engineeringId, s.salesId],
@@ -113,6 +114,7 @@ describe('POST /onboarding with a template', () => {
       'onboarding.assign_role',
       'onboarding.template_add_to_group',
       'onboarding.template_assign_role',
+      'onboarding.create_checklist',
     ]);
     expect(JSON.stringify(s.audit.rows)).not.toContain(res.json().temporaryPassword);
   });
@@ -149,7 +151,10 @@ describe('POST /onboarding with a template', () => {
     expect(retry.statusCode).toBe(200);
     expect(retry.json()).not.toHaveProperty('temporaryPassword');
     expect(retry.json().steps.filter((step: { status: string }) => step.status === 'done')).toEqual(
-      [{ name: 'template_assign_role', status: 'done', label: 'ghost' }],
+      [
+        { name: 'template_assign_role', status: 'done', label: 'ghost' },
+        { name: 'create_checklist', status: 'done' },
+      ],
     );
     expect(s.fake.callCount('createUser')).toBe(1);
   });
