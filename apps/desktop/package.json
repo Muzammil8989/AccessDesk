@@ -17,7 +17,7 @@
   "devDependencies": {
     "@accessdesk/identity": "workspace:*",
     "@accessdesk/shared": "workspace:*",
-    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/inter": "5.3.0",
     "@hookform/resolvers": "5.9.1",
     "@playwright/test": "1.63.0",
     "@radix-ui/react-label": "2.1.16",
