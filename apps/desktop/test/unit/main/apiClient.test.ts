@@ -309,10 +309,14 @@ describe('onboarding calls in the main process', () => {
 });
 
 describe('API path validation', () => {
-  it.each(['/employees', '/employees/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11', '/audit-log'])(
-    'accepts %s',
-    (p) => expect(apiPathSchema.safeParse(p).success).toBe(true),
-  );
+  it.each([
+    '/employees',
+    '/employees/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11',
+    '/templates',
+    '/onboarding/options',
+    '/checklists',
+    '/checklists/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11',
+  ])('accepts %s', (p) => expect(apiPathSchema.safeParse(p).success).toBe(true));
 
   it.each([
     'employees',
@@ -322,5 +326,14 @@ describe('API path validation', () => {
     '/employees?x=1',
     '/employees/../x',
     '/Employees',
-  ])('rejects %s', (p) => expect(apiPathSchema.safeParse(p).success).toBe(false));
+    '/audit-log',
+    '/onboarding',
+    '/onboarding/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11/retry',
+    '/employees/not-a-uuid',
+    '/templates/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11',
+    '/checklists/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11/items/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11',
+    '/employees/',
+    '/employees/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11/',
+    '/employees\n',
+  ])('rejects %j', (p) => expect(apiPathSchema.safeParse(p).success).toBe(false));
 });

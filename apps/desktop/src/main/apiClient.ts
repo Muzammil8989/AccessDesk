@@ -3,7 +3,13 @@ import { z } from 'zod';
 import type { ApiQuery, ApiResponse } from '../shared/ipc';
 import type { AuthService } from './auth/service';
 
-export const apiPathSchema = z.string().regex(/^\/[a-z][a-z0-9-]*(\/[A-Za-z0-9-]+)*$/);
+const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+
+export const apiPathSchema = z
+  .string()
+  .regex(
+    new RegExp(`^/(employees(/${UUID})?|templates|onboarding/options|checklists(/${UUID})?)$`),
+  );
 
 const subjectIdSchema = z.uuid();
 
