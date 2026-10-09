@@ -91,8 +91,17 @@ export const sampleTemplates: Template[] = [
     id: 't1',
     name: 'Developer',
     description: null,
+    departmentRef: null,
+    defaultRole: null,
     items: [
-      { id: 'i1', title: 'Add to group', description: null, kind: 'GROUP_MEMBERSHIP', position: 0 },
+      {
+        id: 'i1',
+        title: 'Add to group',
+        description: null,
+        kind: 'GROUP_MEMBERSHIP',
+        targetRef: '/Engineering',
+        position: 0,
+      },
     ],
   },
 ];
@@ -100,7 +109,10 @@ export const sampleTemplates: Template[] = [
 export function fakeTemplateRepository(
   templates: Template[] = sampleTemplates,
 ): TemplateRepository {
-  return { listWithItems: vi.fn().mockResolvedValue(templates) };
+  return {
+    listWithItems: vi.fn().mockResolvedValue(templates),
+    findById: vi.fn(async (id: string) => templates.find((template) => template.id === id) ?? null),
+  };
 }
 
 export interface TestAppOptions {
@@ -118,10 +130,11 @@ export interface TestAppOptions {
 
 export function buildTestApp(harness: AuthHarness, options: TestAppOptions = {}) {
   const config = { ...testConfig, ...options.config };
+  const audit = options.audit ?? new InMemoryAuditRepository();
   return buildApp({
     config,
     templates: options.templates ?? fakeTemplateRepository(),
-    audit: options.audit ?? new InMemoryAuditRepository(),
+    audit,
     clock: options.clock,
     generatePassword: options.generatePassword,
     logStream: options.logStream,

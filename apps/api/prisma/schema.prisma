@@ -52,11 +52,13 @@ enum AuditOutcome {
 }
 
 model OnboardingTemplate {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   @unique
+  description   String?
+  departmentRef String?  @map("department_ref")
+  defaultRole   String?  @map("default_role")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   items      TemplateItem[]
   checklists EmployeeChecklist[]
@@ -92,6 +94,7 @@ model EmployeeChecklist {
   template OnboardingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   items    ChecklistItem[]
 
+  @@unique([subjectId, type])
   @@index([subjectId])
   @@map("employee_checklists")
 }
