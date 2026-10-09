@@ -16,7 +16,8 @@ regexes = [
 ]
 
 [[allowlists]]
-description = "Fake password used only by the onboarding unit tests. It protects nothing."
+description = "Fake passwords used only by the onboarding unit tests. They protect nothing."
 regexes = [
   '''Kd7mPq2xRt9WnH4v''',
+  '''Pw-Secret-1234567''',
 ]
