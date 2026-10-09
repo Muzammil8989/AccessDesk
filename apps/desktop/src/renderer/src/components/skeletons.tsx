@@ -13,7 +13,7 @@ export function PageSkeleton() {
 export function ShellSkeleton() {
   return (
     <div role="status" aria-label="Loading AccessDesk" className="flex h-screen">
-      <div className="flex w-60 shrink-0 flex-col gap-3 border-r bg-sidebar p-4">
+      <div className="flex w-64 shrink-0 flex-col gap-3 border-r bg-sidebar p-4">
         <Skeleton className="h-8 w-36" />
         <div className="mt-4 flex flex-col gap-2">
           {Array.from({ length: 5 }, (_, i) => (

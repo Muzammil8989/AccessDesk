@@ -12,12 +12,21 @@ interface SeedItem {
   description?: string;
 }
 
-const templates: { name: string; description: string; items: SeedItem[] }[] = [
+interface SeedTemplate {
+  name: string;
+  description: string;
+  departmentRef: string;
+  defaultRole: 'member' | 'manager' | 'admin';
+  items: SeedItem[];
+}
+
+const templates: SeedTemplate[] = [
   {
     name: 'Developer',
     description: 'Engineering hires: source control, CI and internal tooling.',
+    departmentRef: '/Engineering',
+    defaultRole: 'member',
     items: [
-      { title: 'Add to Engineering group', kind: 'GROUP_MEMBERSHIP', targetRef: '/Engineering' },
       { title: 'Assign developer role', kind: 'ROLE', targetRef: 'developer' },
       { title: 'Order laptop', kind: 'MANUAL_TASK', description: 'Standard developer spec.' },
       { title: 'Schedule security awareness training', kind: 'MANUAL_TASK' },
@@ -26,8 +35,9 @@ const templates: { name: string; description: string; items: SeedItem[] }[] = [
   {
     name: 'Sales',
     description: 'Sales hires: CRM and customer-facing tools.',
+    departmentRef: '/Sales',
+    defaultRole: 'member',
     items: [
-      { title: 'Add to Sales group', kind: 'GROUP_MEMBERSHIP', targetRef: '/Sales' },
       { title: 'Assign sales role', kind: 'ROLE', targetRef: 'sales' },
       { title: 'Create CRM account', kind: 'MANUAL_TASK' },
     ],
@@ -35,8 +45,9 @@ const templates: { name: string; description: string; items: SeedItem[] }[] = [
   {
     name: 'HR',
     description: 'HR hires: people systems and confidential records.',
+    departmentRef: '/HR',
+    defaultRole: 'member',
     items: [
-      { title: 'Add to HR group', kind: 'GROUP_MEMBERSHIP', targetRef: '/HR' },
       { title: 'Assign hr-admin role', kind: 'ROLE', targetRef: 'hr-admin' },
       { title: 'Sign confidentiality agreement', kind: 'MANUAL_TASK' },
     ],
@@ -53,8 +64,17 @@ async function main() {
       await prisma.$transaction(async (tx) => {
         const template = await tx.onboardingTemplate.upsert({
           where: { name: t.name },
-          update: { description: t.description },
-          create: { name: t.name, description: t.description },
+          update: {
+            description: t.description,
+            departmentRef: t.departmentRef,
+            defaultRole: t.defaultRole,
+          },
+          create: {
+            name: t.name,
+            description: t.description,
+            departmentRef: t.departmentRef,
+            defaultRole: t.defaultRole,
+          },
         });
         await tx.templateItem.deleteMany({ where: { templateId: template.id } });
         await tx.templateItem.createMany({

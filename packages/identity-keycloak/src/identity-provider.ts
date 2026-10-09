@@ -63,6 +63,9 @@ export function createKeycloakIdentityProvider(options: IdentityProviderOptions)
     },
     addUserToGroup: (subjectId, groupId) => api.addUserToGroup(subjectId, groupId),
     removeUserFromGroup: (subjectId, groupId) => api.removeUserFromGroup(subjectId, groupId),
+    async listRoles() {
+      return (await api.listRoles()).map(mapRole);
+    },
     async getUserRoles(subjectId) {
       return (await api.getUserRoles(subjectId)).map(mapRole);
     },

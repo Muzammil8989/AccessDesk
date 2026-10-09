@@ -29,7 +29,16 @@ describe('response schemas', () => {
   it('accepts a template list', () => {
     expect(
       templateListSchema.safeParse({
-        items: [{ id: 't1', name: 'Dev', description: null, items: [] }],
+        items: [
+          {
+            id: 't1',
+            name: 'Dev',
+            description: null,
+            departmentRef: '/Engineering',
+            defaultRole: 'member',
+            items: [],
+          },
+        ],
       }).success,
     ).toBe(true);
   });

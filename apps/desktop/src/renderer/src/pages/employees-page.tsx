@@ -1,5 +1,5 @@
-import { employeeListSchema, type Employee } from '@accessdesk/shared';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Employee } from '@accessdesk/shared';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronLeft,
   ChevronRight,
@@ -27,11 +27,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useDebouncedValue } from '@/hooks/use-debounced-value';
-import { ApiRequestError, apiGet } from '@/lib/api';
+import { ApiRequestError } from '@/lib/api';
+import { EMPLOYEE_PAGE_SIZE, employeesQuery } from '@/lib/employees-api';
 import { authQuery } from '@/lib/session';
 import { cn } from '@/lib/utils';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = EMPLOYEE_PAGE_SIZE;
 const COLUMNS = 4;
 
 function nameOf(employee: Employee): string {
@@ -58,17 +59,7 @@ export function EmployeesPage() {
   const [page, setPage] = useState(0);
   const search = useDebouncedValue(searchText.trim(), 300);
 
-  const employees = useQuery({
-    queryKey: ['employees', search, page],
-    queryFn: () =>
-      apiGet('/employees', employeeListSchema, {
-        ...(search ? { search } : {}),
-        first: page * PAGE_SIZE,
-        max: PAGE_SIZE,
-      }),
-    placeholderData: keepPreviousData,
-    retry: (count, error) => error instanceof ApiRequestError && error.retryable && count < 2,
-  });
+  const employees = useQuery(employeesQuery(search, page));
 
   const status = employees.error instanceof ApiRequestError ? employees.error.status : null;
   useEffect(() => {

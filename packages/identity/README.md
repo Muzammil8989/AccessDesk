@@ -5,7 +5,8 @@ here names a particular provider ([ADR 0007](../../docs/adr/0007-identity-provid
 [ADR 0009](../../docs/adr/0009-provider-neutral-naming.md)).
 
 ```
-src/identity.ts         IdentityProvider, IdentityUser, IdentityGroup, IdentityRole, IdentityProviderError
+src/identity.ts         IdentityProvider (including listRoles), IdentityUser, IdentityGroup, IdentityRole,
+                        IdentityProviderError
 src/access.ts           admin role names, the super-admin role and the roles claim path: defaults, validation, reading roles from claims
 src/testing/            runIdentityProviderContract (the test every IdentityProvider must pass) and
                         createInMemoryIdentityProvider (a full in-memory provider for tests)

@@ -848,8 +848,8 @@ describe('GET /onboarding/options', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
       departments: [
-        { id: s.engineeringId, name: 'Engineering' },
-        { id: s.salesId, name: 'Sales' },
+        { id: s.engineeringId, name: 'Engineering', path: '/Engineering' },
+        { id: s.salesId, name: 'Sales', path: '/Sales' },
       ],
       roles: [
         { name: 'member', allowed: true },

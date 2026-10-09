@@ -174,6 +174,36 @@ describe('OnboardResultView: the outcome', () => {
     expect(screen.getByText('Onboarding is not finished')).toBeInTheDocument();
   });
 
+  it('names each template step with its group or role, and lists repeated step kinds separately', () => {
+    view({
+      result: {
+        ...complete,
+        status: 'partial',
+        steps: [
+          { name: 'template_add_to_group', status: 'done', label: '/Sales' },
+          { name: 'template_add_to_group', status: 'done', label: '/Support' },
+          {
+            name: 'template_assign_role',
+            status: 'failed',
+            label: 'ghost',
+            message: 'Role "ghost" does not exist in the identity provider',
+          },
+        ],
+      },
+    });
+
+    const steps = within(screen.getByRole('list', { name: 'Onboarding steps' })).getAllByRole(
+      'listitem',
+    );
+    expect(steps).toHaveLength(3);
+    expect(steps[0]).toHaveTextContent('Add to the template group');
+    expect(steps[0]).toHaveTextContent('/Sales');
+    expect(steps[1]).toHaveTextContent('/Support');
+    expect(steps[2]).toHaveTextContent('Assign the template role');
+    expect(steps[2]).toHaveTextContent('ghost');
+    expect(steps[2]).toHaveTextContent('Role "ghost" does not exist in the identity provider');
+  });
+
   it('shows why a retry did not work as an alert', () => {
     view({
       result: { ...complete, status: 'partial' },

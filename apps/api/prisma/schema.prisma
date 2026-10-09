@@ -1,4 +1,3 @@
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -52,11 +51,13 @@ enum AuditOutcome {
 }
 
 model OnboardingTemplate {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   @unique
+  description   String?
+  departmentRef String?  @map("department_ref")
+  defaultRole   String?  @map("default_role")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   items      TemplateItem[]
   checklists EmployeeChecklist[]
@@ -80,18 +81,21 @@ model TemplateItem {
 }
 
 model EmployeeChecklist {
-  id          String          @id @default(uuid()) @db.Uuid
-  subjectId   String          @map("subject_id")
-  templateId  String?         @map("template_id") @db.Uuid
-  type        ChecklistType
-  status      ChecklistStatus @default(OPEN)
-  createdBy   String          @map("created_by")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  completedAt DateTime?       @map("completed_at")
+  id               String          @id @default(uuid()) @db.Uuid
+  subjectId        String          @map("subject_id")
+  templateId       String?         @map("template_id") @db.Uuid
+  type             ChecklistType
+  status           ChecklistStatus @default(OPEN)
+  createdBy        String          @map("created_by")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  completedAt      DateTime?       @map("completed_at")
+  managerSubjectId String?         @map("manager_subject_id")
+  startDate        DateTime?       @map("start_date") @db.Date
 
   template OnboardingTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   items    ChecklistItem[]
 
+  @@unique([subjectId, type])
   @@index([subjectId])
   @@map("employee_checklists")
 }

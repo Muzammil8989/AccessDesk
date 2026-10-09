@@ -9,6 +9,8 @@ const adminUrl = process.env.TEST_DATABASE_URL;
 
 const MIGRATIONS_DIR = path.resolve(import.meta.dirname, '../../prisma/migrations');
 const SUBJECT_ID_MIGRATION = '20261007120000_subject_id_and_append_only_audit_log';
+const TEMPLATE_DATA_MIGRATION = '20261009100100_move_template_department_out_of_items';
+const UNIQUE_VIOLATION = '23505';
 const RAISE_EXCEPTION = 'P0001';
 const NOT_NULL_VIOLATION = '23502';
 
@@ -30,6 +32,45 @@ async function errorOf(promise: Promise<unknown>): Promise<{ code?: string; mess
   throw new Error('Expected the statement to fail, but it succeeded');
 }
 
+async function seedTemplate(
+  db: pg.Client,
+  name: string,
+  items: { kind: string; targetRef: string | null }[],
+  columns: { departmentRef?: string; defaultRole?: string } = {},
+) {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO onboarding_templates (id, name, department_ref, default_role, updated_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, now()) RETURNING id`,
+    [name, columns.departmentRef ?? null, columns.defaultRole ?? null],
+  );
+  for (const [position, item] of items.entries()) {
+    await db.query(
+      `INSERT INTO template_items (id, template_id, title, kind, target_ref, position)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
+      [rows[0]!.id, `${name} item ${position}`, item.kind, item.targetRef, position],
+    );
+  }
+}
+
+async function seedTemplatesInTheOldShape(db: pg.Client) {
+  await seedTemplate(db, 'Single', [
+    { kind: 'GROUP_MEMBERSHIP', targetRef: '/Engineering' },
+    { kind: 'ROLE', targetRef: 'developer' },
+    { kind: 'MANUAL_TASK', targetRef: null },
+  ]);
+  await seedTemplate(db, 'SingleWithRole', [{ kind: 'GROUP_MEMBERSHIP', targetRef: '/Sales' }], {
+    defaultRole: 'manager',
+  });
+  await seedTemplate(db, 'Two', [
+    { kind: 'GROUP_MEMBERSHIP', targetRef: '/A' },
+    { kind: 'GROUP_MEMBERSHIP', targetRef: '/B' },
+  ]);
+  await seedTemplate(db, 'NoTarget', [{ kind: 'GROUP_MEMBERSHIP', targetRef: null }]);
+  await seedTemplate(db, 'Preset', [{ kind: 'GROUP_MEMBERSHIP', targetRef: '/Other' }], {
+    departmentRef: '/Sales',
+  });
+}
+
 describe.skipIf(!adminUrl)('database migrations', () => {
   const dbName = `accessdesk_test_${randomBytes(4).toString('hex')}`;
   let admin: pg.Client;
@@ -38,6 +79,7 @@ describe.skipIf(!adminUrl)('database migrations', () => {
 
   const legacy = { subject: 'legacy-subject-1', admin: 'legacy-admin-1' };
   const LEGACY_CHECKLIST_ID = '00000000-0000-4000-8000-0000000000aa';
+  const notices: string[] = [];
 
   beforeAll(async () => {
     admin = new pg.Client({ connectionString: adminUrl });
@@ -86,7 +128,16 @@ describe.skipIf(!adminUrl)('database migrations', () => {
        INSERT INTO template_items (id, template_id, title, kind, position)
        SELECT gen_random_uuid(), id, 'Assign developer role', 'REALM_ROLE', 0 FROM template`,
     );
-    for (const name of migrationNames.filter((n) => n >= SUBJECT_ID_MIGRATION)) {
+    for (const name of migrationNames.filter(
+      (n) => n >= SUBJECT_ID_MIGRATION && n < TEMPLATE_DATA_MIGRATION,
+    )) {
+      await applyMigration(db, name);
+    }
+    await seedTemplatesInTheOldShape(db);
+    db.on('notice', (notice) => {
+      if (notice.message) notices.push(notice.message);
+    });
+    for (const name of migrationNames.filter((n) => n >= TEMPLATE_DATA_MIGRATION)) {
       await applyMigration(db, name);
     }
   }, 60_000);
@@ -130,6 +181,7 @@ describe.skipIf(!adminUrl)('database migrations', () => {
       expect(rows.map((r) => r.indexname).sort()).toEqual([
         'app_audit_log_target_subject_id_idx',
         'employee_checklists_subject_id_idx',
+        'employee_checklists_subject_id_type_key',
         'offboarding_snapshots_subject_id_idx',
         'scheduled_actions_subject_id_idx',
       ]);
@@ -138,7 +190,10 @@ describe.skipIf(!adminUrl)('database migrations', () => {
 
   describe('item kind rename', () => {
     it('keeps existing items, which now read ROLE instead of the provider-specific name', async () => {
-      const templateItems = await db.query(`SELECT kind FROM template_items`);
+      const templateItems = await db.query(
+        `SELECT kind FROM template_items
+         WHERE template_id = (SELECT id FROM onboarding_templates WHERE name = 'Legacy')`,
+      );
       const checklistItems = await db.query(`SELECT kind FROM checklist_items`);
       expect(templateItems.rows).toEqual([{ kind: 'ROLE' }]);
       expect(checklistItems.rows).toEqual([{ kind: 'ROLE' }]);
@@ -186,6 +241,128 @@ describe.skipIf(!adminUrl)('database migrations', () => {
          VALUES (gen_random_uuid(), 's2', false, 'a') RETURNING client_roles`,
       );
       expect(rows).toEqual([{ client_roles: [] }]);
+    });
+  });
+
+  describe('template department', () => {
+    const template = async (name: string) =>
+      (
+        await db.query(
+          `SELECT t.department_ref, t.default_role,
+                  coalesce(array_agg(i.kind || ':' || coalesce(i.target_ref, '') || '@' || i.position
+                           ORDER BY i.position) FILTER (WHERE i.id IS NOT NULL), '{}') AS items
+           FROM onboarding_templates t LEFT JOIN template_items i ON i.template_id = t.id
+           WHERE t.name = $1 GROUP BY t.id`,
+          [name],
+        )
+      ).rows[0];
+
+    it('moves the one group item of a template into department_ref and defaults the role to member', async () => {
+      expect(await template('Single')).toEqual({
+        department_ref: '/Engineering',
+        default_role: 'member',
+        items: ['ROLE:developer@1', 'MANUAL_TASK:@2'],
+      });
+    });
+
+    it('keeps a default role that was already set', async () => {
+      expect(await template('SingleWithRole')).toEqual({
+        department_ref: '/Sales',
+        default_role: 'manager',
+        items: [],
+      });
+    });
+
+    it.each([
+      ['Two', ['GROUP_MEMBERSHIP:/A@0', 'GROUP_MEMBERSHIP:/B@1']],
+      ['NoTarget', ['GROUP_MEMBERSHIP:@0']],
+      ['Legacy', ['ROLE:@0']],
+    ])('leaves %s unchanged, with no department', async (name, items) => {
+      expect(await template(name)).toEqual({ department_ref: null, default_role: null, items });
+    });
+
+    it('leaves a template that already has a department alone, group item included', async () => {
+      expect(await template('Preset')).toEqual({
+        department_ref: '/Sales',
+        default_role: null,
+        items: ['GROUP_MEMBERSHIP:/Other@0'],
+      });
+    });
+
+    it('reports the templates it did not convert', () => {
+      expect(notices).toEqual([
+        'Templates left unchanged with an empty department_ref: Legacy, NoTarget, Two',
+      ]);
+    });
+
+    it('changes nothing when the clean-up runs again', async () => {
+      const before = await db.query(
+        `SELECT id, department_ref, default_role FROM onboarding_templates ORDER BY name`,
+      );
+      const itemsBefore = await db.query(`SELECT id FROM template_items ORDER BY id`);
+
+      await applyMigration(db, TEMPLATE_DATA_MIGRATION);
+
+      const after = await db.query(
+        `SELECT id, department_ref, default_role FROM onboarding_templates ORDER BY name`,
+      );
+      const itemsAfter = await db.query(`SELECT id FROM template_items ORDER BY id`);
+      expect(after.rows).toEqual(before.rows);
+      expect(itemsAfter.rows).toEqual(itemsBefore.rows);
+    });
+  });
+
+  describe('checklist manager and start date', () => {
+    it('adds a nullable text column for the manager and a nullable date column for the start date', async () => {
+      const { rows } = await db.query(
+        `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+         WHERE table_name = 'employee_checklists'
+           AND column_name IN ('manager_subject_id', 'start_date') ORDER BY column_name`,
+      );
+      expect(rows).toEqual([
+        { column_name: 'manager_subject_id', data_type: 'text', is_nullable: 'YES' },
+        { column_name: 'start_date', data_type: 'date', is_nullable: 'YES' },
+      ]);
+    });
+
+    it('leaves existing checklists without a manager or a start date', async () => {
+      const { rows } = await db.query(
+        `SELECT manager_subject_id, start_date FROM employee_checklists WHERE id = $1`,
+        [LEGACY_CHECKLIST_ID],
+      );
+      expect(rows).toEqual([{ manager_subject_id: null, start_date: null }]);
+    });
+
+    it('stores a start date as a plain calendar date, with no time or time zone', async () => {
+      const { rows } = await db.query(
+        `INSERT INTO employee_checklists (id, subject_id, type, created_by, manager_subject_id, start_date)
+         VALUES (gen_random_uuid(), 'dated-subject', 'ONBOARDING', 'admin-1', 'm-1', '2026-12-31')
+         RETURNING start_date::text AS start_date, manager_subject_id`,
+      );
+      expect(rows).toEqual([{ start_date: '2026-12-31', manager_subject_id: 'm-1' }]);
+    });
+  });
+
+  describe('one checklist per subject and type', () => {
+    it('refuses a second onboarding checklist for the same subject', async () => {
+      const error = await errorOf(
+        db.query(
+          `INSERT INTO employee_checklists (id, subject_id, type, created_by)
+           VALUES (gen_random_uuid(), $1, 'ONBOARDING', 'admin-1')`,
+          [legacy.subject],
+        ),
+      );
+      expect(error.code).toBe(UNIQUE_VIOLATION);
+    });
+
+    it('allows a checklist of another type for the same subject', async () => {
+      await expect(
+        db.query(
+          `INSERT INTO employee_checklists (id, subject_id, type, created_by)
+           VALUES (gen_random_uuid(), $1, 'OFFBOARDING', 'admin-1')`,
+          [legacy.subject],
+        ),
+      ).resolves.toBeDefined();
     });
   });
 

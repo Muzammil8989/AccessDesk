@@ -8,6 +8,9 @@ export const ONBOARDING_AUDIT_ACTIONS: Record<OnboardingStepName, string> = {
   create_user: 'onboarding.create_user',
   add_to_group: 'onboarding.add_to_group',
   assign_role: 'onboarding.assign_role',
+  template_add_to_group: 'onboarding.template_add_to_group',
+  template_assign_role: 'onboarding.template_assign_role',
+  create_checklist: 'onboarding.create_checklist',
 };
 
 export interface AuditingObserverOptions {

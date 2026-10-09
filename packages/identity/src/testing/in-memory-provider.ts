@@ -184,6 +184,11 @@ export function createInMemoryIdentityProvider(): InMemoryIdentityProvider {
       stored(subjectId).groupIds.delete(groupId);
     },
 
+    async listRoles() {
+      take('listRoles');
+      return [...roles.values()].map((role) => ({ ...role }));
+    },
+
     async getUserRoles(subjectId: string) {
       take('getUserRoles');
       const entry = stored(subjectId);

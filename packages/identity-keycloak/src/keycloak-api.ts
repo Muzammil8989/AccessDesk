@@ -66,6 +66,7 @@ export interface AdminApi {
   getUserGroups(subjectId: string): Promise<RawGroup[]>;
   addUserToGroup(subjectId: string, groupId: string): Promise<void>;
   removeUserFromGroup(subjectId: string, groupId: string): Promise<void>;
+  listRoles(): Promise<RawRole[]>;
   getUserRoles(subjectId: string): Promise<RawRole[]>;
   addUserRoles(subjectId: string, roleNames: string[]): Promise<void>;
   removeUserRoles(subjectId: string, roleNames: string[]): Promise<void>;
@@ -73,8 +74,8 @@ export interface AdminApi {
 
 const enc = encodeURIComponent;
 
-const GROUP_PAGE_SIZE = 100;
-const MAX_GROUP_PAGES = 50;
+const LIST_PAGE_SIZE = 100;
+const MAX_LIST_PAGES = 50;
 
 export function parseIssuerUrl(issuerUrl: string): { baseUrl: string; realm: string } {
   const example = 'for example https://sso.example.com/realms/company';
@@ -131,6 +132,23 @@ export function createAdminApi(options: AdminApiOptions): AdminApi {
 
   async function json<T extends z.ZodType>(res: Response, schema: T): Promise<z.infer<T>> {
     return schema.parse(await res.json());
+  }
+
+  async function listAll<T extends z.ZodType>(path: string, schema: T): Promise<z.infer<T>[]> {
+    const items: z.infer<T>[] = [];
+    for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
+      const res = await request('GET', path, {
+        query: {
+          briefRepresentation: 'true',
+          first: page * LIST_PAGE_SIZE,
+          max: LIST_PAGE_SIZE,
+        },
+      });
+      const batch = await json(res, z.array(schema));
+      items.push(...batch);
+      if (batch.length < LIST_PAGE_SIZE) break;
+    }
+    return items;
   }
 
   async function resolveRoles(names: string[]): Promise<RawRole[]> {
@@ -191,22 +209,9 @@ export function createAdminApi(options: AdminApiOptions): AdminApi {
       await request('POST', `/users/${enc(subjectId)}/logout`);
     },
 
-    async listGroups() {
-      const groups: RawGroup[] = [];
-      for (let page = 0; page < MAX_GROUP_PAGES; page += 1) {
-        const res = await request('GET', '/groups', {
-          query: {
-            briefRepresentation: 'true',
-            first: page * GROUP_PAGE_SIZE,
-            max: GROUP_PAGE_SIZE,
-          },
-        });
-        const batch = await json(res, z.array(groupSchema));
-        groups.push(...batch);
-        if (batch.length < GROUP_PAGE_SIZE) break;
-      }
-      return groups;
-    },
+    listGroups: () => listAll('/groups', groupSchema),
+
+    listRoles: () => listAll('/roles', roleSchema),
 
     async getUserGroups(subjectId) {
       const res = await request('GET', `/users/${enc(subjectId)}/groups`);

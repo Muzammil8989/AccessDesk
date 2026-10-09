@@ -5,6 +5,7 @@ import { createAuditingObserver } from '../../src/modules/onboarding/onboarding.
 import {
   describeStepFailure,
   runSteps,
+  StepFailure,
   type OnboardingStep,
   type StepContext,
   type StepObserver,
@@ -100,7 +101,56 @@ describe('runSteps', () => {
   });
 });
 
+describe('runSteps with labelled steps', () => {
+  const labelled = (
+    name: OnboardingStep['name'],
+    label: string,
+    run: () => Promise<void>,
+    satisfied = false,
+  ): OnboardingStep => ({ ...step(name, run, satisfied), label });
+
+  it('carries the label on done, skipped and failed results and leaves it out otherwise', async () => {
+    const { observer } = recordingObserver();
+
+    const outcome = await runSteps(
+      [
+        step('create_user', async () => undefined),
+        labelled('template_add_to_group', '/Sales', async () => undefined),
+        labelled('template_assign_role', 'developer', async () => undefined, true),
+        labelled('template_add_to_group', '/HR', async () => Promise.reject(new StepFailure('no'))),
+        labelled('template_assign_role', 'sales', async () => undefined),
+      ],
+      { subjectId: 'x' },
+      observer,
+    );
+
+    expect(outcome.results).toEqual([
+      { name: 'create_user', status: 'done' },
+      { name: 'template_add_to_group', status: 'done', label: '/Sales' },
+      {
+        name: 'template_assign_role',
+        status: 'skipped',
+        message: 'Already done',
+        label: 'developer',
+      },
+      { name: 'template_add_to_group', status: 'failed', message: 'no', label: '/HR' },
+      {
+        name: 'template_assign_role',
+        status: 'skipped',
+        message: 'Not run because an earlier step failed',
+        label: 'sales',
+      },
+    ]);
+  });
+});
+
 describe('describeStepFailure', () => {
+  it('shows the message of a StepFailure, because it is written for the admin', () => {
+    expect(describeStepFailure(new StepFailure('Role "x" does not exist'))).toBe(
+      'Role "x" does not exist',
+    );
+  });
+
   it.each([
     [
       new IdentityProviderError(403, 'x'),

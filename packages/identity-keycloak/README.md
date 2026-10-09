@@ -13,7 +13,7 @@ const users = await identity.listUsers({ search: 'ann', first: 0, max: 20 });
 
 Operations: `listUsers`, `countUsers`, `findUsers` (exact username or email), `getUser`, `createUser`
 (optionally with `emailVerified` and a temporary `initialPassword`), `disableUser`, `endAllSessions`,
-`listGroups`, `getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `getUserRoles`,
+`listGroups`, `getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `listRoles`, `getUserRoles`,
 `addUserRoles`, `removeUserRoles`. Failures throw `IdentityProviderError` (with the HTTP status, never
 the token).
 

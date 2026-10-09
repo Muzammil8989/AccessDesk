@@ -167,6 +167,23 @@ describe('Keycloak Admin API calls', () => {
     expect(groups).toHaveLength(5000);
   });
 
+  it('lists the realm roles in the brief form and pages like groups', async () => {
+    const page = (from: number, count: number) =>
+      jsonResponse(
+        Array.from({ length: count }, (_, i) => ({ id: `r${from + i}`, name: `role-${from + i}` })),
+      );
+    const { provider, fetchMock } = setup(page(0, 100), page(100, 2));
+
+    const roles = await provider.listRoles();
+
+    expect(call(fetchMock, 0).url).toBe(`${ADMIN}/roles?briefRepresentation=true&first=0&max=100`);
+    expect(call(fetchMock, 1).url).toBe(
+      `${ADMIN}/roles?briefRepresentation=true&first=100&max=100`,
+    );
+    expect(roles).toHaveLength(102);
+    expect(roles[0]).toEqual({ name: 'role-0', description: null });
+  });
+
   it('disables a user with a partial update', async () => {
     const { provider, fetchMock } = setup(new Response(null, { status: 204 }));
     await provider.disableUser(SUBJECT_ID);

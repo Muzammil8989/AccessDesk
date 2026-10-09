@@ -7,6 +7,7 @@ export interface StepContext {
 
 export interface OnboardingStep {
   readonly name: OnboardingStepName;
+  readonly label?: string;
   readonly satisfied: boolean;
   run(context: StepContext): Promise<void>;
   details(): Record<string, string>;
@@ -22,10 +23,31 @@ export interface RunOutcome {
   failure?: { step: OnboardingStepName; error: unknown };
 }
 
+export class StepFailure extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StepFailure';
+  }
+}
+
 const ALREADY_DONE = 'Already done';
 const NOT_RUN = 'Not run because an earlier step failed';
 
+function resultOf(
+  step: OnboardingStep,
+  status: OnboardStep['status'],
+  message?: string,
+): OnboardStep {
+  return {
+    name: step.name,
+    status,
+    ...(message !== undefined && { message }),
+    ...(step.label !== undefined && { label: step.label }),
+  };
+}
+
 export function describeStepFailure(error: unknown): string {
+  if (error instanceof StepFailure) return error.message;
   if (error instanceof IdentityProviderError) {
     if (error.status === 403) {
       return 'The identity provider refused this step. Your account may be missing a permission.';
@@ -45,20 +67,20 @@ export async function runSteps(
 
   for (const [index, step] of steps.entries()) {
     if (step.satisfied) {
-      results.push({ name: step.name, status: 'skipped', message: ALREADY_DONE });
+      results.push(resultOf(step, 'skipped', ALREADY_DONE));
       continue;
     }
     try {
       await step.run(context);
     } catch (error) {
-      results.push({ name: step.name, status: 'failed', message: describeStepFailure(error) });
+      results.push(resultOf(step, 'failed', describeStepFailure(error)));
       await observer.failed(step, context, error);
       for (const pending of steps.slice(index + 1)) {
-        results.push({ name: pending.name, status: 'skipped', message: NOT_RUN });
+        results.push(resultOf(pending, 'skipped', NOT_RUN));
       }
       return { results, failure: { step: step.name, error } };
     }
-    results.push({ name: step.name, status: 'done' });
+    results.push(resultOf(step, 'done'));
     await observer.succeeded(step, context);
   }
   return { results };

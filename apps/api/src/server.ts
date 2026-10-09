@@ -5,6 +5,7 @@ import { loadConfig } from './config';
 import { createPrisma } from './infra/db';
 import { createIdentityProviderFactory } from './infra/identity';
 import { PrismaAuditRepository } from './modules/audit/prisma-audit.repository';
+import { PrismaChecklistRepository } from './modules/checklists/prisma-checklists.repository';
 import { PrismaTemplateRepository } from './modules/templates/prisma-templates.repository';
 
 dotenv.config({ path: path.resolve(import.meta.dirname, '../../../.env'), quiet: true });
@@ -15,6 +16,7 @@ const app = await buildApp({
   config,
   templates: new PrismaTemplateRepository(prisma),
   audit: new PrismaAuditRepository(prisma),
+  checklists: new PrismaChecklistRepository(prisma),
   identityFor: createIdentityProviderFactory(config),
   checkDatabase: async () => {
     await prisma.$queryRaw`SELECT 1`;

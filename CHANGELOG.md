@@ -6,6 +6,37 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- **Sidebar.** The collapse button sits at the top next to the logo, `Ctrl+B` toggles it (not while
+  typing), and the choice is remembered on this device. Collapsed icons, the theme button and Sign out
+  show a styled tooltip on hover and on keyboard focus (`@radix-ui/react-tooltip`, a new
+  `components/ui/tooltip.tsx`) instead of the browser's `title`. Neighbouring sidebar tooltips open at
+  once, and collapsed links keep their hover and active styles.
+- **Onboard screen.** The form is split into four titled cards, with a live summary of what will be
+  created and a "What happens next" list beside it on wide windows. On wide windows the summary stays in view
+  while the form scrolls and holds the "Onboard employee" and new "Clear form" buttons, so nothing floats
+  over the fields. The manager search shows avatars and a
+  "Disabled" badge. The result shows the password, checklist and a step timeline on the left and the
+  details on the right. Accessible names, focus behaviour and API calls are unchanged.
+- **Which roles onboarding may assign is now one shared rule** (ADR 0011). `canAssignRole` and
+  `roleOptions` take a policy (`{ adminRoles, superAdminRole }`), and `roleViolation` is the single
+  function behind them. It applies to the form's role on create and on retry. A role in
+  `AUTH_ADMIN_ROLES` (for example `manager`, if you list it) now needs a super-admin even on the form,
+  and the super-admin role can no longer be given through onboarding. The `403` message names the role.
+- **The desktop's read allowlist is now six fixed paths** instead of any path of a certain shape:
+  `/employees`, `/employees/<uuid>`, `/templates`, `/onboarding/options`, `/checklists` and
+  `/checklists/<uuid>`.
+- `GET /templates` returns each template's `departmentRef`, `defaultRole` and, per item, the `kind` (an
+  enum) and `targetRef`. `GET /onboarding/options` returns each department's group `path`.
+- The step result of onboarding has an optional `label`, and the step names include
+  `template_add_to_group`, `template_assign_role` and `create_checklist`.
+- **Database (three new migrations; run `pnpm --filter @accessdesk/api db:deploy` on existing databases).**
+  Templates gain `department_ref` and `default_role`, and checklists are unique on
+  `(subject_id, type)`. A narrow data migration moves a template's department out of its items, only
+  for a template with no department and exactly one group item (others are left as they are, and a
+  notice lists them). Checklists gain `manager_subject_id` and `start_date`. Until these are applied the
+  new screens fail with "Internal server error".
+- The end-to-end runner now seeds its throwaway database. `ci.yml` is unchanged.
+
 - `pnpm test:e2e` now builds the API and the desktop app itself, every time, then runs
   `apps/desktop/test/e2e/run.mjs`. Do not run `smoke.mjs` directly. The root script no longer runs
   `pnpm build` first.
@@ -36,6 +67,28 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
   `super-admin,hr-admin`) and `AUTH_ROLES_CLAIM_PATH` (default `realm_access.roles`), validated at startup.
 
 ### Added
+
+- **Onboarding, part 2** (ADR 0011).
+  - **Templates:** an optional template on the Onboard form pre-fills the department and role, says so,
+    lists in plain words what it will also do, and is disabled with a reason for someone who may not use
+    it. Template groups and roles run as extra steps (`template_add_to_group`, `template_assign_role`),
+    each with an audit row. A group or role that does not exist fails only its own step, and Retry
+    finishes it. `MANUAL_TASK` items become a checklist.
+  - **Checklists:** `GET /checklists`, `GET /checklists/:subjectId`,
+    `PATCH /checklists/:subjectId/items/:itemId` and `PATCH /checklists/:subjectId`
+    (`409 checklist_has_tasks`). A tick or a close and its audit row are one transaction, after locking
+    the checklist row. A checklist is never created as done; one with no tasks stays open until it is
+    closed. Desktop screens: the checklist on the result screen, `/onboard/checklists` and
+    `/onboard/checklists/:subjectId`.
+  - **Manager and start date:** optional. The manager is picked with the Employees search, checked
+    before anything is created (`unknown_manager`, `manager_disabled`) and saved by `subjectId` only.
+    The start date is saved as a calendar date and is **information only**: the account is enabled at
+    once.
+  - `IdentityProvider.listRoles()`, implemented by the in-memory provider and the adapter.
+  - The bridge gains `api.checklists.setItem` and `api.checklists.setClosed`.
+  - Tests: a real-database test for the tick and close transactions and the row lock, migration tests
+    for every case of the data migration, and an end-to-end scenario for templates, checklists, manager
+    and start date.
 
 - **Onboarding, part 1** (ADR 0010). Desktop: a real Onboard screen (first name, last name, email,
   username, department, role) with a success screen that shows a one-time temporary password, and a

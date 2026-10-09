@@ -22,7 +22,7 @@ function run(command, args, options) {
 const serverUrl = process.env.TEST_DATABASE_URL;
 if (!serverUrl) {
   console.log(
-    'TEST_DATABASE_URL is not set: running without a database. The retry scenario will be skipped.',
+    'TEST_DATABASE_URL is not set: running without a database. The retry and template scenarios will be skipped.',
   );
   process.exit(await run('node', ['test/e2e/smoke.mjs'], { cwd: `${ROOT}/apps/desktop` }));
 }
@@ -51,6 +51,12 @@ try {
     env: { ...process.env, DATABASE_URL: scratchUrl.toString() },
   });
   if (migrated !== 0) throw new Error('Applying the migrations to the scratch database failed');
+
+  const seeded = await run('pnpm', ['exec', 'prisma', 'db', 'seed'], {
+    cwd: `${ROOT}/apps/api`,
+    env: { ...process.env, DATABASE_URL: scratchUrl.toString() },
+  });
+  if (seeded !== 0) throw new Error('Seeding the scratch database failed');
 
   exitCode = await run('node', ['test/e2e/smoke.mjs'], {
     cwd: `${ROOT}/apps/desktop`,

@@ -6,6 +6,8 @@ import type { JWTVerifyGetKey } from 'jose';
 import type { Config } from './config';
 import type { IdentityProviderFactory } from './infra/identity';
 import type { AuditRepository } from './modules/audit/audit.repository';
+import type { ChecklistRepository } from './modules/checklists/checklists.repository';
+import { checklistRoutes } from './modules/checklists/checklists.routes';
 import { employeeRoutes } from './modules/employees/employees.routes';
 import { healthRoutes } from './modules/health/health.routes';
 import { onboardingRoutes } from './modules/onboarding/onboarding.routes';
@@ -19,6 +21,7 @@ export interface AppDeps {
   config: Config;
   templates: TemplateRepository;
   audit: AuditRepository;
+  checklists: ChecklistRepository;
   identityFor: IdentityProviderFactory;
   checkDatabase: () => Promise<void>;
   keyResolver?: JWTVerifyGetKey;
@@ -70,12 +73,17 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   healthRoutes(app, { checkDatabase: deps.checkDatabase });
   templateRoutes(app, deps.templates);
+  const clock = deps.clock ?? (() => new Date());
   employeeRoutes(app, { identityFor: deps.identityFor });
+  checklistRoutes(app, { identityFor: deps.identityFor, checklists: deps.checklists, clock });
   onboardingRoutes(app, {
     identityFor: deps.identityFor,
     audit: deps.audit,
-    clock: deps.clock ?? (() => new Date()),
+    templates: deps.templates,
+    checklists: deps.checklists,
+    clock,
     generatePassword: deps.generatePassword ?? generateTemporaryPassword,
+    adminRoles: config.adminRoles,
     superAdminRole: config.superAdminRole,
   });
 

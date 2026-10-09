@@ -1,20 +1,20 @@
 import type { PrismaClient } from '../../infra/db';
 import type { AuditEntry, AuditRepository, SuccessLookup } from './audit.repository';
 
+export const toAuditData = (entry: AuditEntry) => ({
+  actorId: entry.actorId,
+  action: entry.action,
+  outcome: entry.outcome,
+  targetSubjectId: entry.targetSubjectId,
+  requestId: entry.requestId,
+  details: entry.details,
+});
+
 export class PrismaAuditRepository implements AuditRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async record(entry: AuditEntry): Promise<void> {
-    await this.prisma.appAuditLog.create({
-      data: {
-        actorId: entry.actorId,
-        action: entry.action,
-        outcome: entry.outcome,
-        targetSubjectId: entry.targetSubjectId,
-        requestId: entry.requestId,
-        details: entry.details,
-      },
-    });
+    await this.prisma.appAuditLog.create({ data: toAuditData(entry) });
   }
 
   async hasSuccessSince(lookup: SuccessLookup): Promise<boolean> {

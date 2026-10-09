@@ -81,6 +81,12 @@ export function createFakeAdminServer() {
       .map(decodeURIComponent);
     const [collection, id, sub, subId] = path;
 
+    if (collection === 'roles' && !id && method === 'GET') {
+      const first = Number(url.searchParams.get('first') ?? 0);
+      const max = Number(url.searchParams.get('max') ?? 100);
+      return json([...roles.values()].slice(first, first + max));
+    }
+
     if (collection === 'roles' && id && !sub && method === 'GET') {
       const role = roles.get(id);
       return role ? json(role) : notFound('Role');

@@ -223,6 +223,18 @@ export function runIdentityProviderContract(
         expect((await provider.getUserRoles(subjectId)).map((r) => r.name)).toEqual(['sales']);
       });
 
+      it('lists the realm roles by name, and lists none when none exist', async () => {
+        const fixture = await create();
+        expect(await fixture.provider.listRoles()).toEqual([]);
+
+        await fixture.seedRole('developer');
+        await fixture.seedRole('sales');
+
+        const listed = await fixture.provider.listRoles();
+        expect(listed.map((role) => role.name).sort()).toEqual(['developer', 'sales']);
+        for (const role of listed) expect(role.description).toBeNull();
+      });
+
       it('fails with a 404 IdentityProviderError for a role that does not exist', async () => {
         const { provider } = await create();
         const subjectId = await provider.createUser({ username: 'ann' });
