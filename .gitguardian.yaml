@@ -1,0 +1,11 @@
+# GitGuardian settings (ggshield and the pull request check).
+version: 2
+
+secret:
+  # Made-up passwords used only as test fixtures. They protect nothing. The same values are allowlisted
+  # for gitleaks in .gitleaks.toml. Matched by SHA-256 so this file does not repeat them.
+  ignored-matches:
+    - name: Fake one-time password in the desktop onboarding tests
+      match: 60f74e5b58fa97242fc084779abcfc91d675620a4213cb105eb299dd1e6018a2
+    - name: Fake password in the API onboarding template tests
+      match: 0186cf94a7fd05df21c2c01c49deaa1a3ac6661a5a0f598cc2a18b5ee1069353
