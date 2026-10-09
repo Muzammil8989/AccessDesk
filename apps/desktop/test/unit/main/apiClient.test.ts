@@ -308,6 +308,146 @@ describe('onboarding calls in the main process', () => {
   });
 });
 
+describe('ticking a checklist task', () => {
+  const ITEM_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e01';
+  const detail = { subjectId: SUBJECT_ID, status: 'open', items: [] };
+
+  it('patches the fixed path built from the two ids, with only the wanted state', async () => {
+    const { client, fetchMock } = setup({ responses: [Response.json(detail)] });
+
+    const result = await client.setChecklistItem(SUBJECT_ID, ITEM_ID, { done: true });
+
+    expect(result).toEqual({ ok: true, status: 200, data: detail });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe(`http://api.test/checklists/${SUBJECT_ID}/items/${ITEM_ID}`);
+    expect(init?.method).toBe('PATCH');
+    expect(JSON.parse(init?.body as string)).toEqual({ done: true });
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer tok-1');
+  });
+
+  it('sends only what the shared schema keeps, not extra fields from the caller', async () => {
+    const { client, fetchMock } = setup({ responses: [Response.json(detail)] });
+
+    await client.setChecklistItem(SUBJECT_ID, ITEM_ID, { done: false, status: 'DONE' });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ done: false });
+  });
+
+  it.each([
+    ['a path-like subject id', '../employees', ITEM_ID, { done: true }],
+    ['a subject id with a query', `${SUBJECT_ID}?x=1`, ITEM_ID, { done: true }],
+    ['a path-like task id', SUBJECT_ID, '../x', { done: true }],
+    ['a non-string task id', SUBJECT_ID, 42, { done: true }],
+    ['no body', SUBJECT_ID, ITEM_ID, undefined],
+    ['done as a string', SUBJECT_ID, ITEM_ID, { done: 'yes' }],
+    ['an empty body', SUBJECT_ID, ITEM_ID, {}],
+  ])('refuses %s without calling the API', async (_label, subjectId, itemId, input) => {
+    const { client, fetchMock } = setup({ responses: [] });
+
+    expect(await client.setChecklistItem(subjectId, itemId, input)).toEqual({
+      ok: false,
+      status: 400,
+      message: 'Invalid request',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends the request again once, with a fresh token, after a 401', async () => {
+    const { client, fetchMock, auth } = setup({
+      fresh: 'tok-2',
+      responses: [Response.json({ message: 'expired' }, { status: 401 }), Response.json(detail)],
+    });
+
+    const result = await client.setChecklistItem(SUBJECT_ID, ITEM_ID, { done: true });
+
+    expect(result.ok).toBe(true);
+    expect(auth.forceRefresh).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]![1]?.method).toBe('PATCH');
+    expect((fetchMock.mock.calls[1]![1]?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer tok-2',
+    );
+  });
+
+  it('does not repeat the request after a network failure or timeout, and does not refresh', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('socket hang up'));
+    const forceRefresh = vi.fn().mockResolvedValue('tok-2');
+    const client = createApiClient({
+      getSettings: async () => settings,
+      auth: { getAccessToken: async () => 'tok-1', forceRefresh },
+      fetch: fetchMock,
+    });
+
+    const result = await client.setChecklistItem(SUBJECT_ID, ITEM_ID, { done: true });
+
+    expect(result).toMatchObject({ ok: false, status: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(forceRefresh).not.toHaveBeenCalled();
+  });
+
+  it('keeps the error code of a task that is not found', async () => {
+    const { client } = setup({
+      responses: [
+        Response.json({ error: 'not_found', message: 'Checklist task not found' }, { status: 404 }),
+      ],
+    });
+
+    expect(await client.setChecklistItem(SUBJECT_ID, ITEM_ID, { done: true })).toEqual({
+      ok: false,
+      status: 404,
+      message: 'Checklist task not found',
+      code: 'not_found',
+    });
+  });
+
+  it('gives the write the longer timeout', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const { client } = setup({ responses: [Response.json(detail)] });
+
+    await client.setChecklistItem(SUBJECT_ID, ITEM_ID, { done: true });
+
+    expect(timeout.mock.calls.map(([ms]) => ms)).toEqual([30_000]);
+    timeout.mockRestore();
+  });
+});
+
+describe('creating and retrying an onboarding with a template', () => {
+  const TEMPLATE_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e01';
+
+  it('sends the template id on create and on retry, and refuses one that is not a UUID', async () => {
+    const { client, fetchMock } = setup({
+      responses: [Response.json({}, { status: 201 }), Response.json({})],
+    });
+    const input = {
+      firstName: 'Ann',
+      lastName: 'Lee',
+      email: 'ann@example.com',
+      username: 'ann.lee',
+      departmentGroupId: 'g1',
+      role: 'member',
+    };
+
+    await client.createOnboarding({ ...input, templateId: TEMPLATE_ID });
+    await client.retryOnboarding(SUBJECT_ID, {
+      departmentGroupId: 'g1',
+      role: 'member',
+      templateId: TEMPLATE_ID,
+    });
+    const refused = await client.createOnboarding({ ...input, templateId: '../x' });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toMatchObject({
+      templateId: TEMPLATE_ID,
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({
+      departmentGroupId: 'g1',
+      role: 'member',
+      templateId: TEMPLATE_ID,
+    });
+    expect(refused).toMatchObject({ ok: false, status: 400 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('API path validation', () => {
   it.each([
     '/employees',

@@ -1,4 +1,9 @@
-import { onboardEmployeeSchema, retryOnboardingSchema, type AppSettings } from '@accessdesk/shared';
+import {
+  onboardEmployeeSchema,
+  retryOnboardingSchema,
+  setChecklistItemSchema,
+  type AppSettings,
+} from '@accessdesk/shared';
 import { z } from 'zod';
 import type { ApiQuery, ApiResponse } from '../shared/ipc';
 import type { AuthService } from './auth/service';
@@ -11,7 +16,7 @@ export const apiPathSchema = z
     new RegExp(`^/(employees(/${UUID})?|templates|onboarding/options|checklists(/${UUID})?)$`),
   );
 
-const subjectIdSchema = z.uuid();
+const uuidSchema = z.uuid();
 
 const errorBodySchema = z.object({ message: z.string(), error: z.string().optional() });
 
@@ -21,7 +26,7 @@ const WRITE_TIMEOUT_MS = 30_000;
 const INVALID_REQUEST: ApiResponse = { ok: false, status: 400, message: 'Invalid request' };
 
 interface RequestOptions {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PATCH';
   path: string;
   query?: ApiQuery;
   body?: unknown;
@@ -115,12 +120,29 @@ export function createApiClient(deps: ApiClientDeps) {
     },
 
     async retryOnboarding(subjectId: unknown, input: unknown): Promise<ApiResponse> {
-      const id = subjectIdSchema.safeParse(subjectId);
+      const id = uuidSchema.safeParse(subjectId);
       const parsed = retryOnboardingSchema.safeParse(input);
       if (!id.success || !parsed.success) return INVALID_REQUEST;
       return request({
         method: 'POST',
         path: `/onboarding/${id.data}/retry`,
+        body: parsed.data,
+        timeoutMs: WRITE_TIMEOUT_MS,
+      });
+    },
+
+    async setChecklistItem(
+      subjectId: unknown,
+      itemId: unknown,
+      input: unknown,
+    ): Promise<ApiResponse> {
+      const subject = uuidSchema.safeParse(subjectId);
+      const item = uuidSchema.safeParse(itemId);
+      const parsed = setChecklistItemSchema.safeParse(input);
+      if (!subject.success || !item.success || !parsed.success) return INVALID_REQUEST;
+      return request({
+        method: 'PATCH',
+        path: `/checklists/${subject.data}/items/${item.data}`,
         body: parsed.data,
         timeoutMs: WRITE_TIMEOUT_MS,
       });

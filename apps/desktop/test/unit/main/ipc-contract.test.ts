@@ -80,6 +80,7 @@ function fakeDeps() {
       get: vi.fn(async () => ok),
       createOnboarding: vi.fn(async () => ok),
       retryOnboarding: vi.fn(async () => ok),
+      setChecklistItem: vi.fn(async () => ok),
     },
   };
 }
@@ -163,6 +164,26 @@ describe('IPC contract: what the preload sends is what main reads', () => {
     const input = { departmentGroupId: 'g-eng', role: 'member' };
     await api().api.onboarding.retry('8b1c5f5e', input);
     expect(deps.api.retryOnboarding).toHaveBeenLastCalledWith('8b1c5f5e', input);
+  });
+
+  it('checklists.setItem hands the subject, the task and the input to the API client', async () => {
+    await api().api.checklists.setItem('subject-1', 'item-1', { done: true });
+    expect(deps.api.setChecklistItem).toHaveBeenLastCalledWith('subject-1', 'item-1', {
+      done: true,
+    });
+  });
+
+  it('answers 400 to a checklist call whose payload is not the expected shape', async () => {
+    const handler = electron.handlers.get(IPC.apiChecklistItemSet)!;
+    const frame = { url: 'app://accessdesk/index.html' };
+    const event = { senderFrame: frame, sender: { mainFrame: frame } };
+
+    expect(await handler(event, { subjectId: 1 })).toEqual({
+      ok: false,
+      status: 400,
+      message: 'Invalid request',
+    });
+    expect(await handler(event, 'nope')).toMatchObject({ ok: false, status: 400 });
   });
 
   it('api.get hands the path and query to the API client', async () => {

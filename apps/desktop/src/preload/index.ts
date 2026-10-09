@@ -19,6 +19,10 @@ const api: AccessDeskApi = {
       create: (input) => ipcRenderer.invoke(IPC.apiOnboardingCreate, input),
       retry: (subjectId, input) => ipcRenderer.invoke(IPC.apiOnboardingRetry, { subjectId, input }),
     },
+    checklists: {
+      setItem: (subjectId, itemId, input) =>
+        ipcRenderer.invoke(IPC.apiChecklistItemSet, { subjectId, itemId, input }),
+    },
   },
 };
 
