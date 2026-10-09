@@ -11,7 +11,7 @@ discovery), requires one of the configured admin roles (default `super-admin` or
 src/config/     environment parsing and validation (Zod)
 src/infra/      real implementations: database client (Prisma + pg adapter), the `IdentityProviderFactory` type and the adapter choice,
                 job queue stub (pg-boss)
-src/modules/    one folder per feature (audit, employees, health, onboarding, templates), each with its own layers
+src/modules/    one folder per feature (audit, checklists, employees, health, onboarding, templates), each with its own layers
 src/plugins/    auth (JWT + role guard) and the error handler
 prisma/         schema.prisma, migrations, seed
 test/           unit/, integration/ (HTTP tests with app.inject()), helpers/
@@ -26,11 +26,18 @@ test/           unit/, integration/ (HTTP tests with app.inject()), helpers/
 | `pnpm --filter @accessdesk/api db:seed`    | Seed the Developer, Sales, HR templates |
 
 Routes: `GET /health` and `GET /ready` (public probes), `GET /templates`, `GET /employees`,
-`GET /employees/:id`, and the onboarding routes `GET /onboarding/options`, `POST /onboarding` and
-`POST /onboarding/:subjectId/retry` ([ADR 0010](../../docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md)).
-The onboarding routes are limited to 20 requests a minute per IP and are sent with
-`Cache-Control: no-store`. `POST /onboarding` answers `201`, or `207` when a step after creating the
-user failed. Only the role named by `AUTH_SUPER_ADMIN_ROLE` may assign the `admin` role.
+`GET /employees/:id`, the onboarding routes `GET /onboarding/options`, `POST /onboarding` and
+`POST /onboarding/:subjectId/retry` ([ADR 0010](../../docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md),
+[ADR 0011](../../docs/adr/0011-onboarding-part-2-templates-checklists-manager-start-date.md)), and the
+checklist routes `GET /checklists`, `GET /checklists/:subjectId`,
+`PATCH /checklists/:subjectId/items/:itemId` (tick a task) and `PATCH /checklists/:subjectId` (close or
+reopen one that has no tasks). The onboarding routes are limited to 20 requests a minute per IP, and
+both groups are sent with `Cache-Control: no-store`. `POST /onboarding` answers `201`, or `207` when a
+step after creating the user failed. One shared rule decides which roles onboarding may assign: `owner`
+and the `AUTH_SUPER_ADMIN_ROLE` role never, `admin` and the `AUTH_ADMIN_ROLES` roles only for a super-admin.
+
+After pulling a change that adds a migration, run `pnpm --filter @accessdesk/api db:deploy`. Until you do,
+the new screens fail with "Internal server error".
 
 Each module has its own layers (routes, service, repository or client). `server.ts` is the only place
 that chooses real implementations, and tests pass fakes through the same `AppDeps`. See

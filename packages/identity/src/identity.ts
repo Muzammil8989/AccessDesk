@@ -65,6 +65,7 @@ export interface IdentityProvider {
   addUserToGroup(subjectId: string, groupId: string): Promise<void>;
   removeUserFromGroup(subjectId: string, groupId: string): Promise<void>;
 
+  listRoles(): Promise<IdentityRole[]>;
   getUserRoles(subjectId: string): Promise<IdentityRole[]>;
   addUserRoles(subjectId: string, roleNames: string[]): Promise<void>;
   removeUserRoles(subjectId: string, roleNames: string[]): Promise<void>;

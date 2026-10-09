@@ -39,6 +39,15 @@ Durations: fast 150ms, base 200ms, slow 250ms; easing `ease-standard`. Animate c
 - Every clickable element has `cursor-pointer`. Icon-only buttons need an `aria-label`. Decorative icons get `aria-hidden`.
 - Errors sit next to the field (`aria-describedby`). Forms with several fields also get a focusable error summary that links to each invalid field.
 - Icons are `lucide-react` SVGs only, never emoji.
+- Never pass a function `className` (NavLink) to a Radix `asChild` trigger: Slot joins class names as
+  strings. Work out the active state first (`useMatch`).
+- Hints on icon-only controls use `Tooltip` / `WithTooltip` from `components/ui/tooltip.tsx` (token
+  pair `tooltip` / `tooltip-foreground`), never the `title` attribute. A tooltip adds to an accessible
+  name; it never replaces the `aria-label` or visually hidden text.
+- Sidebar: `w-64` expanded, `w-[68px]` collapsed, toggled by the header button or `Ctrl+B`, and the
+  choice is kept in `localStorage` (`accessdesk.sidebar`). Collapsed links show their label as a tooltip.
+- Long forms: one card per section (icon, `h2` title naming the fieldset, one-line description), and from `xl` up a summary column beside the form that
+  stays in view (`sticky`) and holds the submit button. Nothing floats over the fields.
 
 ## Do not
 

@@ -19,6 +19,7 @@ function stubViewport(matches: boolean) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 describe('app shell', () => {
@@ -70,14 +71,61 @@ describe('app shell', () => {
     expect(expand).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('link', { name: 'Employees' })).toBeInTheDocument();
     expect(screen.getByText('Employees', { selector: 'span' })).toHaveClass('sr-only');
-    expect(screen.getByRole('link', { name: 'Offboard' })).toHaveAttribute(
-      'title',
-      'Offboard (soon)',
+    expect(screen.getByRole('link', { name: 'Offboard' })).not.toHaveAttribute('title');
+    // The tooltip trigger once turned the link's class function into text, unstyling it.
+    expect(screen.getByRole('link', { name: 'Employees' }).className).not.toMatch(/=>|isActive/);
+    expect(screen.getByRole('link', { name: 'Onboard' })).toHaveClass(
+      'rounded-lg',
+      'bg-primary/10',
     );
+
+    await user.hover(screen.getByRole('link', { name: 'Offboard' }));
+    const tip = await screen.findByRole('tooltip');
+    expect(tip).toHaveTextContent('Offboard');
+    expect(tip).toHaveTextContent('Soon');
+    await user.unhover(screen.getByRole('link', { name: 'Offboard' }));
 
     await user.click(expand);
     expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
     expect(screen.getByText('Employees', { selector: 'span' })).not.toHaveClass('sr-only');
+  });
+
+  it('shows no tooltip on a link while its label is on screen', async () => {
+    const user = userEvent.setup();
+    installFakeApi({ auth: adminAuth });
+    renderRoutes(routes, '/onboard');
+    await screen.findByRole('heading', { name: 'Onboard' });
+
+    await user.hover(screen.getByRole('link', { name: 'Employees' }));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('toggles with Ctrl+B, but not while typing', async () => {
+    const user = userEvent.setup();
+    installFakeApi({ auth: adminAuth });
+    renderRoutes(routes, '/settings');
+    await screen.findByLabelText('Issuer URL');
+
+    await user.keyboard('{Control>}b{/Control}');
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText('Issuer URL'));
+    await user.keyboard('{Control>}b{/Control}');
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+  });
+
+  it('remembers the choice for the next launch', async () => {
+    const user = userEvent.setup();
+    installFakeApi({ auth: adminAuth });
+    const first = renderRoutes(routes, '/onboard');
+    await screen.findByRole('heading', { name: 'Onboard' });
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    first.unmount();
+
+    renderRoutes(routes, '/onboard');
+    await screen.findByRole('heading', { name: 'Onboard' });
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
   });
 
   it('starts icon-only in a narrow window, and the user can still expand it', async () => {

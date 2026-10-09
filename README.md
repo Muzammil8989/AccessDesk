@@ -18,9 +18,10 @@ provider-neutral interface ([ADR 0007](docs/adr/0007-identity-provider-interface
 
 > [!NOTE]
 > **Status: early development (v0.1.0).** Login, a protected app shell, the Employees list, the
-> first-run setup wizard and the first part of Onboarding (create an employee, department group, role
-> and a one-time temporary password) work end to end against test doubles. Offboarding and the
-> remaining screens are placeholders. See [Project status](#project-status).
+> first-run setup wizard and Onboarding (create an employee, department group, role and a one-time
+> temporary password, from an optional template, with a manager, a start date and a checklist) work end
+> to end against test doubles. Offboarding and the remaining screens are placeholders. See
+> [Project status](#project-status).
 
 ## Contents
 
@@ -92,22 +93,22 @@ URL. These are public values saved locally. No secret is ever asked for.
 
 `pnpm run setup` copies [.env.example](.env.example) to `.env`. Never commit `.env`.
 
-| Variable                | Required | Default                                         | Purpose                                                        |
-| ----------------------- | -------- | ----------------------------------------------- | -------------------------------------------------------------- |
-| `IDENTITY_PROVIDER`     | No       | `keycloak`                                      | Which adapter talks to the identity provider (only one exists) |
-| `IDENTITY_ISSUER_URL`   | Yes      | `http://localhost:8080/realms/company-platform` | The OIDC issuer: the `iss` of its tokens                       |
-| `IDENTITY_CLIENT_ID`    | Yes      | `accessdesk`                                    | Public client used by the desktop app                          |
-| `IDENTITY_AUDIENCE`     | No       | `IDENTITY_CLIENT_ID`                            | Expected `aud` claim of access tokens                          |
-| `AUTH_ADMIN_ROLES`      | No       | `super-admin,hr-admin`                          | Comma-separated roles that may use AccessDesk (any one)        |
-| `AUTH_SUPER_ADMIN_ROLE` | No       | `super-admin`                                   | The one role that may give someone the `admin` role            |
-| `AUTH_ROLES_CLAIM_PATH` | No       | `realm_access.roles`                            | Dot-separated path to the role names in the access token       |
-| `DATABASE_URL`          | Yes      | local PostgreSQL                                | Connection string for AccessDesk's own database                |
-| `POSTGRES_PASSWORD`     | No       | `change-me`                                     | Password for the Docker database. Change it outside local use  |
-| `API_PORT`              | No       | `4000`                                          | Port the API listens on                                        |
-| `API_HOST`              | No       | `127.0.0.1`                                     | Bind address. Use `0.0.0.0` only behind a reverse proxy        |
-| `API_TRUST_PROXY`       | No       | `false`                                         | Trust `X-Forwarded-*` headers. Only behind a proxy you control |
-| `RATE_LIMIT_PER_MINUTE` | No       | `300`                                           | Requests per client IP per minute before the API answers `429` |
-| `LOG_LEVEL`             | No       | `info`                                          | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` |
+| Variable                | Required | Default                                         | Purpose                                                                                          |
+| ----------------------- | -------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `IDENTITY_PROVIDER`     | No       | `keycloak`                                      | Which adapter talks to the identity provider (only one exists)                                   |
+| `IDENTITY_ISSUER_URL`   | Yes      | `http://localhost:8080/realms/company-platform` | The OIDC issuer: the `iss` of its tokens                                                         |
+| `IDENTITY_CLIENT_ID`    | Yes      | `accessdesk`                                    | Public client used by the desktop app                                                            |
+| `IDENTITY_AUDIENCE`     | No       | `IDENTITY_CLIENT_ID`                            | Expected `aud` claim of access tokens                                                            |
+| `AUTH_ADMIN_ROLES`      | No       | `super-admin,hr-admin`                          | Comma-separated roles that may use AccessDesk (any one)                                          |
+| `AUTH_SUPER_ADMIN_ROLE` | No       | `super-admin`                                   | The one role that may give someone an admin-level role. It can never be given through onboarding |
+| `AUTH_ROLES_CLAIM_PATH` | No       | `realm_access.roles`                            | Dot-separated path to the role names in the access token                                         |
+| `DATABASE_URL`          | Yes      | local PostgreSQL                                | Connection string for AccessDesk's own database                                                  |
+| `POSTGRES_PASSWORD`     | No       | `change-me`                                     | Password for the Docker database. Change it outside local use                                    |
+| `API_PORT`              | No       | `4000`                                          | Port the API listens on                                                                          |
+| `API_HOST`              | No       | `127.0.0.1`                                     | Bind address. Use `0.0.0.0` only behind a reverse proxy                                          |
+| `API_TRUST_PROXY`       | No       | `false`                                         | Trust `X-Forwarded-*` headers. Only behind a proxy you control                                   |
+| `RATE_LIMIT_PER_MINUTE` | No       | `300`                                           | Requests per client IP per minute before the API answers `429`                                   |
+| `LOG_LEVEL`             | No       | `info`                                          | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent`                                   |
 
 The API and the desktop app both read `AUTH_ADMIN_ROLES`, `AUTH_SUPER_ADMIN_ROLE` and
 `AUTH_ROLES_CLAIM_PATH`, from this same
@@ -118,20 +119,22 @@ desktop settings wizard asks only for the issuer URL, the client ID and the API 
 
 Run all commands from the repository root.
 
-| Command              | What it does                                                              |
-| -------------------- | ------------------------------------------------------------------------- |
-| `pnpm run setup`     | One-time setup: `.env`, PostgreSQL, migrations, seed                      |
-| `pnpm dev:all`       | Database, migrations, then API and desktop app                            |
-| `pnpm dev`           | API and desktop app only (database already running)                       |
-| `pnpm check`         | Everything CI runs: lint, naming check, format, typecheck, test, build    |
-| `pnpm test`          | Unit and integration tests in every package                               |
-| `pnpm test:coverage` | Tests with a coverage report and minimum thresholds                       |
-| `pnpm test:e2e`      | Build, then an end-to-end test (mock identity provider, real API and app) |
-| `pnpm db:up`         | Start the local PostgreSQL container                                      |
-| `pnpm db:migrate`    | Create and apply a migration after editing `schema.prisma`                |
+| Command                                   | What it does                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------- |
+| `pnpm run setup`                          | One-time setup: `.env`, PostgreSQL, migrations, seed                      |
+| `pnpm dev:all`                            | Database, migrations, then API and desktop app                            |
+| `pnpm dev`                                | API and desktop app only (database already running)                       |
+| `pnpm check`                              | Everything CI runs: lint, naming check, format, typecheck, test, build    |
+| `pnpm test`                               | Unit and integration tests in every package                               |
+| `pnpm test:coverage`                      | Tests with a coverage report and minimum thresholds                       |
+| `pnpm test:e2e`                           | Build, then an end-to-end test (mock identity provider, real API and app) |
+| `pnpm db:up`                              | Start the local PostgreSQL container                                      |
+| `pnpm db:migrate`                         | Create and apply a migration after editing `schema.prisma`                |
+| `pnpm --filter @accessdesk/api db:deploy` | Apply existing migrations to a database. Do this after pulling            |
 
 `pnpm test:e2e` needs a display. Set `TEST_DATABASE_URL` to a PostgreSQL server to also run the
-onboarding retry scenario: the runner creates a throwaway database and drops it afterwards.
+retry, template and checklist, and manager scenarios: the runner creates a throwaway database, seeds it
+and drops it afterwards.
 
 The full list, with the Git hooks and testing conventions, is in the
 [development guide](docs/development.md).
@@ -215,13 +218,25 @@ tree and the testing conventions are in the [development guide](docs/development
   [design system](design-system/accessdesk/MASTER.md).
 - Employees list with search, pagination, and loading, empty and error states (desktop to API to
   identity provider)
-- API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id`
-- Onboarding, part 1 ([ADR 0010](docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md)):
-  the Onboard screen and `GET /onboarding/options`, `POST /onboarding` and
-  `POST /onboarding/:subjectId/retry`. It creates the user, adds them to a department group, assigns
-  `member`, `manager` or `admin` (`admin` only for the super-admin role) and returns a one-time
-  temporary password. Each step is audited, a partial failure can be retried, and nothing is rolled
-  back. **Tested against fakes only; not yet run against a real identity provider.**
+- API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id`, and the
+  onboarding and checklist routes below
+- Onboarding ([ADR 0010](docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md),
+  [ADR 0011](docs/adr/0011-onboarding-part-2-templates-checklists-manager-start-date.md)): the Onboard
+  screen and `GET /onboarding/options`, `POST /onboarding` and `POST /onboarding/:subjectId/retry`. It
+  creates the user, adds them to a department group, assigns `member`, `manager` or `admin` and returns a
+  one-time temporary password. Each step is audited, a partial failure can be retried, and nothing is
+  rolled back.
+  - **Templates.** An optional template pre-fills the department and role and adds groups, roles and
+    manual tasks. One shared rule decides which roles may be assigned (`owner` and the super-admin role
+    never; `admin` and the `AUTH_ADMIN_ROLES` roles only for a super-admin), for the form and for
+    templates. A group or role that does not exist fails only its own step and can be retried.
+  - **Checklists.** `GET /checklists` (Open or Done, 20 per page), `GET /checklists/:subjectId` and two
+    `PATCH` routes to tick a task and to close one that has no tasks. A tick and its audit row are one
+    transaction. They are never created as done. Names are looked up live; only the `subjectId` is saved.
+  - **Manager and start date.** The manager is picked with the Employees search and checked before
+    anything is created. The start date is **information only**: the account is enabled at once.
+  - **Tested against fakes and a mock identity provider only; not yet run against a real identity
+    provider.** The checks to run are in the [provider setup guide](docs/keycloak-setup.md).
 - PostgreSQL schema, first migration and seed
 - `packages/identity` (the provider-neutral interface) and `packages/identity-keycloak` (its adapter),
   with unit and contract tests (mocked `fetch`)
@@ -229,7 +244,8 @@ tree and the testing conventions are in the [development guide](docs/development
 **Not built yet**
 
 - Offboard, Access Review and Audit Log screens (placeholders today)
-- The rest of Onboarding: checklists, templates, manager, start date, bulk import and email
+- The rest of Onboarding: bulk import (CSV), email, and a template editor (templates can be applied, but
+  not yet created or edited in the app)
 - Employee detail and edit screens (the API route for one employee exists)
 - API routes for the identity provider's other write functions (disable, end sessions, remove groups
   and roles). The functions are implemented and tested, but no route calls them yet.
@@ -264,6 +280,7 @@ tree and the testing conventions are in the [development guide](docs/development
 | Electron crashes on start with `Cannot read properties of undefined (reading 'enableSandbox')` | `ELECTRON_RUN_AS_NODE` is set (editors built on Electron, such as VS Code, can leak it). `pnpm dev` clears it for you in `electron.vite.config.ts`. If you start Electron another way, unset it. |
 | `pnpm run setup` says Docker failed                                                            | Start Docker Desktop and run it again.                                                                                                                                                           |
 | Login fails with an issuer message in the wizard                                               | The identity provider reports a different issuer than the URL you typed (for example behind a proxy). Use the exact issuer it is configured with, and the same value in `IDENTITY_ISSUER_URL`.   |
+| "Internal server error" on a new screen after pulling                                          | The development database is behind. Run `pnpm --filter @accessdesk/api db:deploy` (or `pnpm dev:all`, which migrates first).                                                                     |
 | `403` on the Employees list                                                                    | The token is valid, but the admin lacks a permission in the identity provider to read users (see the provider setup guide), or lacks an admin role (`AUTH_ADMIN_ROLES`).                         |
 | Linux: the session ends when you quit the app                                                  | Secure storage needs a running keyring (libsecret). Without it the session lasts only until you quit.                                                                                            |
 

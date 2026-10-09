@@ -75,8 +75,11 @@ of the code only knows a provider-neutral interface.
 7. **Validate all input with Zod on both sides.** Never log tokens or passwords. Authorization headers
    are redacted, error messages never include tokens, and the UI never shows raw validation output.
 8. `.env` files are git-ignored. Only `.env.example` is committed.
-9. **Provider-neutral naming:** the vendor name appears only where `scripts/naming-allowlist.json`
-   allows; `pnpm check` runs `scripts/check-naming.mjs` (ADR 0009).
+9. **`hr-admin` never gets `realm-admin` or `manage-realm`** in the identity provider, directly or
+   through a composite role. It gets only the narrower admin roles that onboarding needs, so an HR
+   admin cannot change the realm's own settings.
+10. **Provider-neutral naming:** the vendor name appears only where `scripts/naming-allowlist.json`
+    allows; `pnpm check` runs `scripts/check-naming.mjs` (ADR 0009).
 
 ## Repository structure
 
@@ -93,10 +96,11 @@ accessdesk/
 │   │   │   ├── errors.ts           AppError (status, code, message)
 │   │   │   ├── modules/
 │   │   │   │   ├── audit/          audit repository interface and Prisma implementation
+│   │   │   │   ├── checklists/     routes, service, repository interface, Prisma repository, live names
 │   │   │   │   ├── employees/      routes, service, mapper
 │   │   │   │   ├── health/         /health and /ready
-│   │   │   │   ├── onboarding/     routes, service, steps, runner, audit observer, errors,
-│   │   │   │   │                   temporary-password
+│   │   │   │   ├── onboarding/     routes, service, steps, template steps, runner, audit observer,
+│   │   │   │   │                   errors, temporary-password
 │   │   │   │   └── templates/      routes, repository interface, Prisma repository
 │   │   │   ├── plugins/            auth.ts (JWT + role guard), jwks.ts (signing keys through
 │   │   │   │                       OIDC discovery), error-handler.ts
@@ -114,15 +118,16 @@ accessdesk/
 │       └── test/                   unit/main/, unit/renderer/, e2e/ (run.mjs, smoke.mjs)
 ├── packages/
 │   ├── shared/                     src/ (employee, template, settings, error, onboarding,
-│   │                               permissions), test/unit/
+│   │                               role-policy, checklist, permissions), test/unit/
 │   ├── identity/                   src/ (identity, access, index, testing/), test/unit/
 │   └── identity-keycloak/          src/ (keycloak-api, identity-provider, index), test/ (unit,
 │                                   integration, helpers)
 ├── design-system/accessdesk/       MASTER.md: UI tokens, typography, motion, interaction rules
-├── docs/                           development, keycloak-setup.md, security, adr/, this file
+├── docs/                           development, coding-standards, keycloak-setup.md, security, adr/, this file
 ├── scripts/                        lib.mjs, setup.mjs, dev-all.mjs, clean.mjs, check-naming.mjs,
 │                                   naming-allowlist.json
-├── .github/                        workflows (ci, codeql, audit-schedule), templates, dependabot
+├── .github/                        workflows (ci, security, security-enforce, codeql, scorecard,
+│                                   audit-schedule, labeler, stale), templates, dependabot, CODEOWNERS
 ├── docker-compose.yml              PostgreSQL 16.15 only, named volume
 └── .env.example, eslint.config.js, turbo.json, pnpm-workspace.yaml, tsconfig.base.json, ...
 ```
@@ -137,30 +142,74 @@ Seven tables, snake_case through `@@map`: `onboarding_templates`, `template_item
 `employee_checklists`, `checklist_items`, `scheduled_actions`, `offboarding_snapshots`,
 `app_audit_log`. Employees are referenced by `subject_id` (text, the OIDC `sub`), and the audit log by
 `target_subject_id`. No name or email columns. The item kind enum `ItemKind` has the values
-`GROUP_MEMBERSHIP`, `ROLE` and `MANUAL_TASK`. `app_audit_log` is append-only (triggers block updates,
-deletes and truncation) and records an `outcome` and a `request_id`. `offboarding_snapshots` keep `client_roles`
-and `was_enabled`. Four migrations: `init`, a subject-ID and audit-log migration, a role-kind
-migration and a migration that blocks `TRUNCATE` on the audit log (older migrations are history and are never edited). The seed creates the templates
-Developer, Sales and HR, each with a few items (it is safe to run again). Generator: `prisma-client`,
-output `apps/api/src/generated/prisma` (git-ignored).
+`GROUP_MEMBERSHIP`, `ROLE` and `MANUAL_TASK`.
+
+- **Templates.** `onboarding_templates` has `department_ref` (a top-level group path such as
+  `/Engineering`) and `default_role` (`member`, `manager` or `admin`), which pre-fill the form. A
+  template's items name an extra group path (`GROUP_MEMBERSHIP`), a realm role name (`ROLE`) or a manual
+  task (`MANUAL_TASK`) in `target_ref`. The seed creates Developer, Sales and HR in this shape and is safe
+  to run again.
+- **Checklists.** `employee_checklists` is unique on `(subject_id, type)`. It has a `status` (`OPEN`,
+  `COMPLETED`, `CANCELLED`), `manager_subject_id` (text) and `start_date` (a `DATE`, information only).
+  `checklist_items` are the template's manual tasks, copied in.
+- **Audit log.** `app_audit_log` is append-only (triggers block updates, deletes and truncation) and
+  records an `outcome` and a `request_id`. `offboarding_snapshots` keep `client_roles` and `was_enabled`.
+- **Migrations** (older ones are history and are never edited): `init`; a subject-ID and audit-log
+  migration; a role-kind migration; a migration that blocks `TRUNCATE` on the audit log; one that adds
+  the template department and default role and the unique checklist constraint; a narrow data
+  migration that moves a template's department out of its items (only when `department_ref` is empty
+  and the template has exactly one group item; others are left alone and listed in a notice); and one
+  that adds the checklist manager and start date. After pulling, apply new migrations to an existing
+  database with `pnpm --filter @accessdesk/api db:deploy`.
+- Generator: `prisma-client`, output `apps/api/src/generated/prisma` (git-ignored).
 
 ### API (`apps/api`)
 
 - Routes: `GET /health` (liveness), `GET /ready` (readiness, 503 with no detail if the database does
-  not answer), `GET /templates`, `GET /employees` (query: `search`, `first`, `max` up to 100, returns
-  items plus `total`), `GET /employees/:id` (UUID only), and the onboarding routes (ADR 0010):
-  `GET /onboarding/options` (departments from the provider's groups, and the roles with an `allowed`
-  flag), `POST /onboarding` (`201`, or `207` with `status: 'partial'` when a step after `create_user`
-  failed) and `POST /onboarding/:subjectId/retry` (`200` or `207`). They are limited to 20 requests a
-  minute per IP, per route, and answer with `Cache-Control: no-store`. Error codes `username_exists`
-  and `email_exists` are `409`.
-- **Onboarding.** `OnboardingService` runs three steps (`create_user`, `add_to_group`, `assign_role`)
-  through `runSteps`, one object per step, and an observer writes an audit row for each. There is no
-  automatic rollback. A retry needs a `SUCCESS` audit row for `onboarding.create_user` for that
-  subject, by the same actor, in the last 24 hours, and skips what is already done. The temporary
-  password is generated on the server (`crypto.randomInt`, 16 characters), sent to the provider as a
-  temporary credential and returned once. It is never stored, logged or audited. Only the role named by
-  `AUTH_SUPER_ADMIN_ROLE` may assign `admin`.
+  not answer), `GET /templates` (each template with its department, default role and items),
+  `GET /employees` (query: `search`, `first`, `max` up to 100, returns items plus `total`),
+  `GET /employees/:id` (UUID only), the onboarding routes (ADR 0010 and 0011): `GET /onboarding/options`
+  (departments from the provider's groups with their path, and the roles with an `allowed` flag),
+  `POST /onboarding` (`201`, or `207` with `status: 'partial'` when a step after `create_user` failed) and
+  `POST /onboarding/:subjectId/retry` (`200` or `207`), and the checklist routes: `GET /checklists`
+  (`status=open|done`, `first`, `max` at most 20), `GET /checklists/:subjectId`,
+  `PATCH /checklists/:subjectId/items/:itemId` (body `{ done }`) and `PATCH /checklists/:subjectId` (body
+  `{ closed }`). Only the three onboarding routes (`GET /onboarding/options`, `POST /onboarding`,
+  `POST /onboarding/:subjectId/retry`) are limited to 20 requests a minute per IP, per route. The
+  checklist routes have no limit of their own and fall under the global limit (default 300 a minute).
+  Both groups answer with `Cache-Control: no-store`. Error codes: `username_exists` and `email_exists`
+  (`409`), `unknown_manager` and `manager_disabled` (`400`), `checklist_has_tasks` (`409`).
+- **Onboarding.** `OnboardingService` builds a list of step objects and runs them through `runSteps`; an
+  observer writes one audit row per step. The steps are `create_user`, `add_to_group`, `assign_role`, then
+  `template_add_to_group` and `template_assign_role` (one per template item, with a `label`) and
+  `create_checklist`. There is no automatic rollback. A retry needs a `SUCCESS` audit row for
+  `onboarding.create_user` for that subject, by the same actor, in the last 24 hours, and skips what is
+  already in place. The temporary password is generated on the server (`crypto.randomInt`, 16
+  characters), sent to the provider as a temporary credential and returned once. It is never stored,
+  logged or audited.
+- **Role rule (ADR 0011).** One shared function, `roleViolation` in `packages/shared/src/role-policy.ts`,
+  decides which roles onboarding may assign. It covers the role chosen on the form (on create and on
+  retry) and every role a template names, and it runs before anything is created (`403`). `owner` and the
+  super-admin role (`AUTH_SUPER_ADMIN_ROLE`) are never assigned. `admin` and every `AUTH_ADMIN_ROLES` role
+  need a super-admin. Names are compared without regard to case. The seeded HR template assigns
+  `hr-admin`, so it needs a super-admin.
+- **Templates.** A template only pre-fills the department and role (editable) and adds items. A group
+  equal to the department, and duplicates, are skipped. A group or role that does not exist in the
+  identity provider fails only its own step with a clear message (`207`), and Retry finishes it once the
+  name exists. Only top-level groups and realm roles can be matched. `MANUAL_TASK` items are never run.
+- **Checklists.** The `create_checklist` step creates one onboarding checklist when the template has
+  manual tasks, or a manager is given, or a start date is given. A checklist is never created as done. It
+  is `open` until it is closed: with tasks it closes itself when the last task is ticked and reopens if one
+  is unticked; with no tasks it stays in the Open list until `PATCH /checklists/:subjectId` closes it
+  (`409 checklist_has_tasks` for one that has tasks). A tick or a close and its audit row
+  (`checklist.item_done`, `checklist.item_undone`, `checklist.close`, `checklist.reopen`) are written in one
+  database transaction, after locking the checklist row. Names, the manager's included, are looked up
+  live (five at a time) and show as unknown when a lookup fails. They are never saved.
+- **Manager and start date.** The manager is optional. The API checks them in the identity provider
+  before creating anything (`unknown_manager`, `manager_disabled`) and saves only their `subjectId`. Retry
+  checks the manager again only while the checklist does not exist. The start date is optional and
+  **information only**: the account is created and enabled at once, and nothing is scheduled (see the
+  open question on scheduled actions below).
 - **Layers and dependency injection.** Routes only handle HTTP. `EmployeesService` depends on the
   `IdentityProvider` interface. Templates use a `TemplateRepository` interface with a Prisma
   implementation. `buildApp(deps)` takes `{ config, templates, audit, identityFor, checkDatabase,
@@ -196,7 +245,7 @@ keyResolver?, fetch?, clock?, generatePassword?, logStream? }`, where `identityF
 `packages/identity` (`@accessdesk/identity`) holds the provider-neutral `IdentityProvider` interface:
 `listUsers`, `countUsers`, `findUsers` (exact username or email), `getUser`, `createUser` (with
 optional `emailVerified` and a temporary `initialPassword`), `disableUser`, `endAllSessions`,
-`listGroups`, `getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `getUserRoles`,
+`listGroups`, `getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `listRoles`, `getUserRoles`,
 `addUserRoles`, `removeUserRoles`. It also
 holds the neutral types (`IdentityUser` with `subjectId`, `username`, `email`, `firstName`,
 `lastName`, `enabled`, `emailVerified`, `createdAt`; `IdentityGroup`; `IdentityRole`), the
@@ -212,8 +261,8 @@ provider. Only `src/keycloak-api.ts` knows its admin REST paths and raw response
 `createKeycloakIdentityProvider({ issuerUrl, getToken, fetch? })`. It derives the admin API base URL
 and the realm from the issuer URL and throws a clear error when it cannot. Role names are resolved to
 representations internally. Responses are validated with Zod. Failures throw `IdentityProviderError`
-with the status and never the token. The onboarding routes use `createUser`, `findUsers`,
-`listGroups`, `addUserToGroup`, `getUserGroups`, `getUserRoles` and `addUserRoles`. The other write
+with the status and never the token. The onboarding and checklist routes use `createUser`, `findUsers`,
+`getUser`, `listGroups`, `addUserToGroup`, `getUserGroups`, `listRoles`, `getUserRoles` and `addUserRoles`. The other write
 functions exist and are tested, but no API route uses them yet.
 
 ### Desktop app (`apps/desktop`)
@@ -233,38 +282,59 @@ functions exist and are tested, but no API route uses them yet.
     discarded, memory only without secure storage) behind a `TokenStorage` interface.
   - `store/settingsStore.ts`: plain JSON with public values only (`issuerUrl`, `clientId`, `apiUrl`).
     `store/legacy-settings.ts` migrates older saved settings automatically.
-  - `apiClient.ts`: `get` (15 s timeout) and two fixed writes, `createOnboarding` and
-    `retryOnboarding` (30 s timeout; the paths are built here and the input is validated with the
-    shared schemas). The bearer token is added here. One retry after a 401 with a fresh token, never
-    after a network error or timeout (a write may already have been applied). `redirect: 'error'`,
-    path allowlist regex, friendly errors that never contain the token. API errors carry their
-    `code`, and `207` counts as a success with a body.
+  - `apiClient.ts`: `get` (15 s timeout) and four fixed writes, `createOnboarding`, `retryOnboarding`,
+    `setChecklistItem` and `setChecklistClosed` (30 s timeout; the paths are built here from validated
+    UUIDs and the input is validated with the shared schemas). `get` only accepts six fixed paths
+    (`/employees`, `/employees/<uuid>`, `/templates`, `/onboarding/options`, `/checklists`,
+    `/checklists/<uuid>`). The bearer token is added here. One retry after a 401 with a fresh token, never
+    after a network error or timeout (a write may already have been applied). `redirect: 'error'`, friendly
+    errors that never contain the token. API errors carry their `code`, and `207` counts as a success
+    with a body.
   - `security.ts`: `app://accessdesk` origin helpers, CSP builder (production: `default-src 'none'`,
     scripts and styles from `self`, `connect-src 'none'`), path-traversal-safe file resolver.
   - `index.ts`, `window.ts`, `ipc.ts`: Electron wiring: single instance lock, sandbox, `app://` protocol
     handler that adds the CSP header, dev-server CSP, permission denial (only clipboard write is
     allowed, for the app's own page), trusted-sender checks on IPC.
-- **Preload** exposes `window.accessdesk` with `settings`, `auth` and `api`: `api.get` plus the two
-  onboarding write calls, `api.onboarding.create` and `api.onboarding.retry` (ADR 0010).
+- **Preload** exposes `window.accessdesk` with `settings`, `auth` and `api`: `api.get`, the two onboarding
+  writes (`api.onboarding.create`, `api.onboarding.retry`) and the two checklist writes
+  (`api.checklists.setItem`, `api.checklists.setClosed`). `ipc-contract.test.ts` checks every channel has a
+  handler and a preload function.
 - **Renderer.** Hash routes: `/setup` (first-run wizard), `/login`, `/no-access`, and under the app
-  layout `/employees`, `/onboard`, `/offboard`, `/access-review`, `/audit-log`, `/settings`. Only
-  Employees, Onboard (part 1) and Settings do real work, the rest are placeholders. Employees has debounced search,
-  pagination, loading, empty and error states, and retries only network and 5xx errors. The settings
-  form (Issuer URL, Client ID, AccessDesk API URL; no realm field) is validated with Zod and has a
-  "Test connection" button, and the settings page card is titled "Identity provider connection". The
-  login button says "Sign in". API responses are validated against the shared schemas, and a bad shape becomes a plain
-  message, never raw validation output.
+  layout `/employees`, `/onboard`, `/onboard/checklists`, `/onboard/checklists/:subjectId`, `/offboard`,
+  `/access-review`, `/audit-log`, `/settings`. The checklist screens use the existing `onboard` feature.
+  Employees, Onboard (with its checklist screens) and Settings do real work, the rest are placeholders.
+  Employees has debounced search, pagination, loading, empty and error states, and retries only network
+  and 5xx errors; its query (`lib/employees-api.ts`) is reused by the manager picker. The settings form
+  (Issuer URL, Client ID, AccessDesk API URL; no realm field) is validated with Zod and has a "Test
+  connection" button, and the settings page card is titled "Identity provider connection". The login
+  button says "Sign in". API responses are validated against the shared schemas, and a bad shape becomes
+  a plain message, never raw validation output.
 - **Look and feel** (see `design-system/accessdesk/MASTER.md`). A Light, Dark or System theme
   (`lib/theme.ts`, saved in `localStorage`, the `.dark` class on `<html>`), a sidebar that collapses
-  (automatically on narrow windows, or by hand), toast messages (`lib/toast.ts`, errors stay until
+  (automatically on narrow windows, or by hand with its header button or `Ctrl+B`, remembered in
+  `localStorage`; collapsed icons get Radix tooltips, never `title`), toast messages (`lib/toast.ts`, errors stay until
   dismissed), loading skeletons, inline alerts, and forms that show an error summary linking to each
   invalid field. Colours come only from semantic tokens in `styles.css`.
-- **Onboard screen.** A form (first name, last name, email, username, department, role) that loads its
-  options from `GET /onboarding/options`. The `admin` option is disabled unless the user holds the
-  super-admin role (the API enforces it). A complete result shows the one-time temporary password with
-  a Copy button and a reminder that it is shown once. A partial result lists each step and offers
-  Retry. The password lives only in component state and is cleared when the admin leaves the page. If
-  the response to a create is lost, the screen tells the admin to check the Employees list.
+- **Onboard screen.** A form (first name, last name, email, username, an optional template, department,
+  role, an optional manager and an optional start date) that loads its options from
+  `GET /onboarding/options` and the templates from `GET /templates`. Choosing a template fills in the
+  department and role, says so in a status message and lists in plain words what the template will also
+  do. A template with a role the person may not assign is disabled with the reason (the API enforces it).
+  The role options use the same shared rule (`roleViolation`). The manager is chosen with a search, a
+  native radio group (arrow keys do not pick anyone) and a confirm button; a disabled account is listed
+  but cannot be chosen. The start date field always says: "Information only. The account is created and
+  enabled now. It does not unlock on this date." A complete result shows the one-time temporary
+  password with a Copy button and a reminder that it is shown once, then the checklist (native
+  checkboxes, polite announcements; a checklist with no tasks offers "Mark as done"). A partial result
+  lists each step and offers Retry. The password lives only in component state and is cleared when the
+  admin leaves the page. If the response to a create is lost, the screen tells the admin to check the
+  Employees list.
+- **Checklist screens.** `/onboard/checklists` has an Open/Done radio filter, a table of 20 per page with
+  the employee, manager, start date and progress, and links to the detail screen.
+  `/onboard/checklists/:subjectId` shows the person, the manager, the start date and the tasks. A name that
+  cannot be looked up shows as unknown. The page heading takes focus on arrival, controls are native and
+  at least 40px, and after a failed save the list is loaded again, because a request that timed out may
+  still have been applied.
 - **Role-based visibility.** `packages/shared/src/permissions.ts` says which roles may use which
   feature (`hasAdminAccess(roles, adminRoles)`,
   `canAccess(roles, feature, adminRoles, superAdminRole?)`; a `super-admin` feature such as
@@ -279,8 +349,10 @@ functions exist and are tested, but no API route uses them yet.
 ### Repo automation
 
 `pnpm setup` (env file, PostgreSQL, migrations, seed), `pnpm dev:all` (database, migrations, then API and
-app), `pnpm dev`, `pnpm check` (lint, format check, typecheck, tests, build), `pnpm test:coverage`,
-`pnpm test:e2e`, `pnpm clean`, `pnpm db:up`, `pnpm db:down`, `pnpm db:migrate`. Git hooks: pre-commit runs
+app), `pnpm dev`, `pnpm check` (lint, naming check, format check, typecheck, tests, build; coverage floors run in
+`pnpm test:coverage` and in CI), `pnpm test:coverage`,
+`pnpm test:e2e`, `pnpm clean`, `pnpm db:up`, `pnpm db:down`, `pnpm db:migrate` (creates a migration), and `pnpm --filter @accessdesk/api db:deploy`
+(applies existing migrations to a database). Git hooks: pre-commit runs
 lint-staged, pre-push runs typecheck and tests.
 
 ## Quality rules
@@ -291,14 +363,18 @@ lint-staged, pre-push runs typecheck and tests.
   (`@accessdesk/identity-*`); the identity provider admin path (`/admin/realms`) may only appear in
   `packages/identity-*`. The naming check (`scripts/check-naming.mjs`) is part of `pnpm check`. Also: type-aware rules (no floating promises), accessibility rules for JSX, `eqeqeq`, no `console` in
   production code.
-- **Tests never need a real identity provider or database.** API tests sign real JWTs with a local key
+- **Tests never need a real identity provider. They need a database only in three places** (each is skipped
+  without `TEST_DATABASE_URL`, and CI sets it): the migration tests, the real-database checklist repository
+  tests (the tick and close transactions, the row lock) and the end-to-end test. API tests sign real JWTs with a local key
   set, and every adapter must pass the shared contract test (`runIdentityProviderContract`). The
   e2e test starts a mock identity provider (discovery, JWKS, PKCE-verifying token endpoint, a few admin
-  endpoints), the **real built API** and the **real built Electron app**, and drives it with Playwright
-  (including the no-access scenario, session restore after restart, CSP enforcement and an onboarding
-  scenario). `pnpm test:e2e` rebuilds the API and the app each time. Without `TEST_DATABASE_URL` the
-  onboarding retry scenario is skipped (the audit log needs a database); with it, `e2e/run.mjs`
-  creates a throwaway `accessdesk_e2e_<hex>` database, migrates it, runs the test and drops it.
+  endpoints including the role list and one user), the **real built API** and the **real built Electron
+  app**, and drives it with Playwright (including the no-access scenario, session restore after restart,
+  CSP enforcement, the onboarding scenario, and with a database the retry, template and checklist, and
+  manager and start date scenarios). `pnpm test:e2e` rebuilds the API and the app each time. Without
+  `TEST_DATABASE_URL` the database scenarios are skipped; with it, `e2e/run.mjs` creates a throwaway
+  `accessdesk_e2e_<hex>` database, migrates it, seeds the templates, runs the test and drops it. It never
+  touches the development database.
 - **Coverage thresholds** are a floor in each `vitest.config.ts` (95% lines, statements and functions
   for the API and packages, 90/88/85 for the desktop app, 75% branches). Electron glue is excluded from
   unit coverage and exercised by the e2e test.
@@ -331,20 +407,55 @@ lint-staged, pre-push runs typecheck and tests.
 - **Playwright and navigation:** a navigation that the app blocks leaves Playwright waiting, so that
   check runs last in the e2e script.
 
+- **Pending migrations look like a 500.** A screen that suddenly shows "Internal server error" after you
+  pull can simply mean the development database has not had the new migrations. Run
+  `pnpm --filter @accessdesk/api db:deploy` (`pnpm dev:all` does it for you).
+- **Concurrent ticks.** Two tasks ticked at the same moment used to leave a finished checklist marked
+  open. The tick and the close lock the checklist row first, and a real-database test fails without it.
+- **`$$` in generated SQL.** `String.replace` turns `$$` into `$` in its replacement text, so a script that
+  writes a PL/pgSQL body can corrupt it. Write such files directly.
+- **Playwright and live regions.** `locator.check()` expects the box to flip at once, but the app only
+  changes it after the server accepts, so click and wait. `getByText` matches substrings, so a visible
+  "1 of 2 tasks done" also matches its screen-reader announcement; use `exact: true`.
+
 ## Known gaps and open questions
 
-- Onboarding is only part 1: checklists, templates, manager, start date, bulk import and email are not
-  built. Offboard, Access Review and Audit Log screens, and employee detail and edit screens, are not
-  built. Only the onboarding routes use the identity provider's write functions.
-- Onboarding has been tested against fakes only (an in-memory provider, a fake admin API and a mock
-  identity provider in the e2e test), not against a real identity provider. See ADR 0010.
+- Onboarding part 2 is built (templates, checklists, manager, start date). Not built: bulk import (CSV),
+  email, and a template editor (templates are applied, but created and edited only in the database or the
+  seed). Offboard, Access Review and Audit Log screens, and employee detail and edit screens, are not
+  built. Only the onboarding and checklist routes use the identity provider's write functions.
+- Onboarding part 1 (create, department, role, retry, one-time password) and the role rule were checked
+  on a real instance of the first supported identity provider on 9 October 2026. Templates,
+  checklists, the manager and the start date have not been checked on a real one yet; so far they are
+  tested against fakes only (an in-memory provider, a fake admin API and a mock identity provider in the
+  e2e test). See ADR 0010 and 0011. The checks to run are listed in `docs/keycloak-setup.md`.
 - **Scheduled actions (pg-boss):** a job that runs later has no logged-in admin token to forward.
   Decide between stored offline tokens and running the action when an admin next opens the app, before
-  building them (ADR 0003, `apps/api/src/infra/jobs.ts`).
-- Not yet verified against a real identity provider: that it accepts the loopback redirect
-  `http://127.0.0.1/callback` for any port. See `docs/keycloak-setup.md`.
+  building them (ADR 0003, `apps/api/src/infra/jobs.ts`). This is why the start date is only
+  information.
+- The loopback redirect `http://127.0.0.1/callback` with any port is verified on the identity
+  provider version in use. Other versions are untested. See `docs/keycloak-setup.md`.
 - Packaging and installers, the web build, an API Dockerfile and Playwright specs (one end-to-end
   script exists) are not done. The e2e test is not in CI because it needs a display.
+
+## Current status
+
+- Built: login, the employee list, onboarding part 1 and part 2 (templates, checklists, manager, start
+  date) and the checklist screens.
+- Checked on a real identity provider (9 October 2026): onboarding part 1, the role rule and the loopback
+  redirect. Everything else is tested against fakes only.
+- Placeholders: Offboard, Access Review, Audit Log, and employee detail and edit.
+
+## Next work
+
+In this order:
+
+1. **Phase 0 checks:** run the remaining real-provider checks in `docs/keycloak-setup.md` for templates,
+   checklists, the manager and the start date, and fix what they find.
+2. **Offboarding** (ADR 0012, to be written before building).
+3. **Audit log** screen.
+4. **Employee detail and edit.**
+5. **Template editor**, so templates no longer have to be changed in the database or the seed.
 
 ## Working style
 

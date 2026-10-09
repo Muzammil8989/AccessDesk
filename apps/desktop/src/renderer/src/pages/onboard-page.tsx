@@ -1,22 +1,26 @@
 import {
   canAccess,
+  templateViolation,
   type OnboardEmployee,
   type OnboardResult,
   type OnboardingOptions,
   type RetryOnboarding,
+  type Template,
 } from '@accessdesk/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ListChecks } from 'lucide-react';
 import { useState } from 'react';
-import { OnboardForm, type SubmitFailure } from '@/components/onboard-form';
+import { Link } from 'react-router';
+import { OnboardForm, type SubmitFailure, type TemplatesState } from '@/components/onboard-form';
 import { OnboardResultView, type OnboardSummary } from '@/components/onboard-result';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiRequestError } from '@/lib/api';
 import { createOnboarding, onboardingOptionsQuery, retryOnboarding } from '@/lib/onboarding-api';
 import { authQuery } from '@/lib/session';
+import { templatesQuery } from '@/lib/templates-api';
 
 interface OnboardSession {
   result: OnboardResult;
@@ -35,20 +39,66 @@ function describeFailure(error: unknown): SubmitFailure {
   if (!(error instanceof ApiRequestError)) return { message: UNKNOWN_FAILURE };
   if (error.code === 'username_exists') return { field: 'username', message: error.message };
   if (error.code === 'email_exists') return { field: 'email', message: error.message };
+  if (error.code === 'unknown_manager' || error.code === 'manager_disabled') {
+    return { field: 'managerSubjectId', message: error.message };
+  }
   if (error.status === 429) return { message: RATE_LIMITED };
   if (error.status === 0) return { message: NETWORK_FAILURE };
   if (error.status >= 500) return { message: SERVER_FAILURE };
   return { message: error.message };
 }
 
-function summaryOf(values: OnboardEmployee, options: OnboardingOptions): OnboardSummary {
+/** Mirrors the form's layout, so nothing jumps when the options arrive. */
+function FormSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading the form"
+      className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]"
+    >
+      <div className="flex flex-col gap-6">
+        {[2, 1, 2].map((rows, index) => (
+          <div key={index} className="rounded-xl border bg-card shadow-xs">
+            <div className="flex items-center gap-3 border-b px-6 py-4">
+              <Skeleton className="size-8 rounded-lg" />
+              <div className="flex flex-col gap-1.5">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-64 max-w-full" />
+              </div>
+            </div>
+            <div className="grid gap-5 p-6 sm:grid-cols-2">
+              {Array.from({ length: rows * 2 }, (_, i) => (
+                <div key={i} className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <Skeleton className="hidden h-80 rounded-xl xl:block" />
+    </div>
+  );
+}
+
+function summaryOf(
+  values: OnboardEmployee,
+  options: OnboardingOptions,
+  templates: readonly Template[],
+  managerName: string | undefined,
+): OnboardSummary {
   const department = options.departments.find((item) => item.id === values.departmentGroupId);
+  const template = templates.find((item) => item.id === values.templateId);
   return {
     name: `${values.firstName} ${values.lastName}`,
     username: values.username,
     email: values.email,
     departmentName: department?.name ?? values.departmentGroupId,
     role: values.role,
+    ...(template && { templateName: template.name }),
+    ...(managerName && { managerName }),
+    ...(values.startDate && { startDate: values.startDate }),
   };
 }
 
@@ -56,6 +106,7 @@ export function OnboardPage() {
   const queryClient = useQueryClient();
   const auth = useQuery(authQuery);
   const options = useQuery(onboardingOptionsQuery);
+  const templates = useQuery(templatesQuery);
   const [session, setSession] = useState<OnboardSession | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
 
@@ -68,7 +119,10 @@ export function OnboardPage() {
     }
   };
 
-  async function submit(values: OnboardEmployee): Promise<SubmitFailure | null> {
+  async function submit(
+    values: OnboardEmployee,
+    details: { managerName?: string },
+  ): Promise<SubmitFailure | null> {
     if (!options.data) return { message: UNKNOWN_FAILURE };
     try {
       const result = await create.mutateAsync(values);
@@ -77,8 +131,14 @@ export function OnboardPage() {
       setSession({
         result,
         password: result.temporaryPassword ?? null,
-        summary: summaryOf(values, options.data),
-        retryInput: { departmentGroupId: values.departmentGroupId, role: values.role },
+        summary: summaryOf(values, options.data, templates.data?.items ?? [], details.managerName),
+        retryInput: {
+          departmentGroupId: values.departmentGroupId,
+          role: values.role,
+          ...(values.templateId && { templateId: values.templateId }),
+          ...(values.managerSubjectId && { managerSubjectId: values.managerSubjectId }),
+          ...(values.startDate && { startDate: values.startDate }),
+        },
       });
       return null;
     } catch (error) {
@@ -117,9 +177,31 @@ export function OnboardPage() {
     auth.data?.superAdminRole,
   );
 
+  const templatesState: TemplatesState = templates.isPending
+    ? 'loading'
+    : templates.isError
+      ? 'error'
+      : 'ready';
+  const templateBlockedReason = (template: Template) =>
+    templateViolation(template, auth.data?.roles ?? [], {
+      adminRoles: auth.data?.adminRoles ?? [],
+      superAdminRole: auth.data?.superAdminRole ?? '',
+    });
+
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
-      <PageHeader title="Onboard" description="Add a new person to the company." />
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Onboard"
+        description="Create an account, place them in a department and hand over a temporary password."
+        actions={
+          <Button asChild variant="outline">
+            <Link to="/onboard/checklists">
+              <ListChecks />
+              Open checklists
+            </Link>
+          </Button>
+        }
+      />
 
       {session ? (
         <OnboardResultView
@@ -132,57 +214,45 @@ export function OnboardPage() {
           onReset={startOver}
         />
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>New employee</CardTitle>
-            <CardDescription>
-              Creates the account, adds it to a department and assigns a role. You get a temporary
-              password to hand over.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {options.isPending && (
-              <div role="status" aria-label="Loading the form" className="flex flex-col gap-4">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            )}
-            {options.isError && (
-              <Alert variant="destructive" role="alert">
-                <AlertDescription className="mt-0 text-foreground">
-                  {options.error instanceof ApiRequestError
-                    ? options.error.message
-                    : 'Could not load the departments.'}
-                </AlertDescription>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => void options.refetch()}
-                >
-                  Try again
-                </Button>
-              </Alert>
-            )}
-            {options.data && options.data.departments.length === 0 && (
-              <Alert variant="info" role="status">
-                <AlertDescription className="mt-0 text-foreground">
-                  No departments were found in the identity provider. Create a top-level group there
-                  first, then reload this page.
-                </AlertDescription>
-              </Alert>
-            )}
-            {options.data && options.data.departments.length > 0 && (
-              <OnboardForm
-                options={options.data}
-                canAssignAdmin={canAssignAdmin}
-                onSubmit={submit}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <>
+          {options.isPending && <FormSkeleton />}
+          {options.isError && (
+            <Alert variant="destructive" role="alert">
+              <AlertDescription className="mt-0 text-foreground">
+                {options.error instanceof ApiRequestError
+                  ? options.error.message
+                  : 'Could not load the departments.'}
+              </AlertDescription>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => void options.refetch()}
+              >
+                Try again
+              </Button>
+            </Alert>
+          )}
+          {options.data && options.data.departments.length === 0 && (
+            <Alert variant="info" role="status">
+              <AlertDescription className="mt-0 text-foreground">
+                No departments were found in the identity provider. Create a top-level group there
+                first, then reload this page.
+              </AlertDescription>
+            </Alert>
+          )}
+          {options.data && options.data.departments.length > 0 && (
+            <OnboardForm
+              options={options.data}
+              canAssignAdmin={canAssignAdmin}
+              templates={templates.data?.items ?? []}
+              templatesState={templatesState}
+              templateBlockedReason={templateBlockedReason}
+              onSubmit={submit}
+            />
+          )}
+        </>
       )}
     </div>
   );

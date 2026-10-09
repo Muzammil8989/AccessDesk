@@ -2,7 +2,7 @@ import type { AppSettings } from '@accessdesk/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router';
+import { createMemoryRouter, MemoryRouter, RouterProvider, type RouteObject } from 'react-router';
 import { vi } from 'vitest';
 import type {
   AccessDeskApi,
@@ -65,6 +65,8 @@ export interface FakeApiOptions {
   apiGet?: (path: string, query?: Record<string, string | number>) => Promise<ApiResponse>;
   onboardingCreate?: (input: unknown) => Promise<ApiResponse>;
   onboardingRetry?: (subjectId: string, input: unknown) => Promise<ApiResponse>;
+  checklistSetItem?: (subjectId: string, itemId: string, input: unknown) => Promise<ApiResponse>;
+  checklistSetClosed?: (subjectId: string, input: unknown) => Promise<ApiResponse>;
   login?: () => Promise<LoginResult>;
   saveSettings?: (input: unknown) => Promise<SettingsSaveResult>;
   testConnection?: (input: unknown) => Promise<ConnectionTestResult>;
@@ -107,6 +109,16 @@ export function installFakeApi(options: FakeApiOptions = {}) {
             (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),
         ),
       },
+      checklists: {
+        setClosed: vi.fn(
+          options.checklistSetClosed ??
+            (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),
+        ),
+        setItem: vi.fn(
+          options.checklistSetItem ??
+            (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),
+        ),
+      },
     },
   } satisfies AccessDeskApi;
 
@@ -119,7 +131,11 @@ function newQueryClient() {
 }
 
 export function renderWithProviders(ui: ReactElement) {
-  return render(<QueryClientProvider client={newQueryClient()}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={newQueryClient()}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>,
+  );
 }
 
 export function renderRoutes(routes: RouteObject[], initialPath: string) {

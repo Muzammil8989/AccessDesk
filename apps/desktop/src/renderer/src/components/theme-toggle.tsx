@@ -1,4 +1,5 @@
 import { Monitor, Moon, Sun, type LucideIcon } from 'lucide-react';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useTheme, type Theme } from '@/lib/theme';
 
@@ -27,18 +28,19 @@ export function ThemeToggle({
     const next = OPTIONS[(index + 1) % OPTIONS.length]!;
     const Icon = current.icon;
     return (
-      <button
-        type="button"
-        aria-label={`Theme: ${current.label}. Switch to ${next.label}`}
-        title={`Theme: ${current.label}. Switch to ${next.label}`}
-        onClick={() => setTheme(next.value)}
-        className={cn(
-          'flex size-10 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-150 ease-standard hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
-          className,
-        )}
-      >
-        <Icon className="size-4" aria-hidden="true" />
-      </button>
+      <WithTooltip label={`Theme: ${current.label}. Switch to ${next.label}`}>
+        <button
+          type="button"
+          aria-label={`Theme: ${current.label}. Switch to ${next.label}`}
+          onClick={() => setTheme(next.value)}
+          className={cn(
+            'flex size-10 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-150 ease-standard hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+            className,
+          )}
+        >
+          <Icon className="size-4" aria-hidden="true" />
+        </button>
+      </WithTooltip>
     );
   }
 
@@ -49,22 +51,22 @@ export function ThemeToggle({
       className={cn('flex gap-1 rounded-md bg-muted p-1', className)}
     >
       {OPTIONS.map(({ value, label, icon: Icon }) => (
-        <button
-          key={value}
-          type="button"
-          aria-pressed={theme === value}
-          aria-label={`${label} theme`}
-          title={`${label} theme`}
-          onClick={() => setTheme(value)}
-          className={cn(
-            'flex h-8 flex-1 cursor-pointer items-center justify-center rounded-sm outline-none transition-colors duration-150 ease-standard focus-visible:ring-2 focus-visible:ring-ring',
-            theme === value
-              ? 'bg-card text-foreground shadow-xs'
-              : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Icon className="size-4" aria-hidden="true" />
-        </button>
+        <WithTooltip key={value} label={`${label} theme`} side="top">
+          <button
+            type="button"
+            aria-pressed={theme === value}
+            aria-label={`${label} theme`}
+            onClick={() => setTheme(value)}
+            className={cn(
+              'flex h-8 flex-1 cursor-pointer items-center justify-center rounded-sm outline-none transition-colors duration-150 ease-standard focus-visible:ring-2 focus-visible:ring-ring',
+              theme === value
+                ? 'bg-card text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon className="size-4" aria-hidden="true" />
+          </button>
+        </WithTooltip>
       ))}
     </div>
   );
