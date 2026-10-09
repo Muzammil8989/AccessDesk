@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import type { ApiResponse } from '../../../src/shared/ipc';
 import { OnboardPage } from '../../../src/renderer/src/pages/onboard-page';
@@ -68,12 +69,15 @@ const partial = {
   temporaryPassword: PASSWORD,
 };
 
-function setup(options: FakeApiOptions & { options?: unknown } = {}) {
-  const { options: optionsPayload = hrOptions, ...rest } = options;
+function setup(options: FakeApiOptions & { options?: unknown; templates?: unknown[] } = {}) {
+  const { options: optionsPayload = hrOptions, templates = [], ...rest } = options;
   return installFakeApi({
     auth: adminAuth,
-    apiGet: async (path) =>
-      path === '/onboarding/options' ? ok(optionsPayload) : fail(404, 'not set up'),
+    apiGet: async (path) => {
+      if (path === '/onboarding/options') return ok(optionsPayload);
+      if (path === '/templates') return ok({ items: templates });
+      return fail(404, 'not set up');
+    },
     ...rest,
   });
 }
@@ -102,7 +106,10 @@ describe('Onboard screen: loading the form', () => {
   it('shows a loading state, then the departments', async () => {
     let release: (value: ApiResponse) => void = () => undefined;
     setup({
-      apiGet: () => new Promise<ApiResponse>((resolve) => (release = resolve)),
+      apiGet: (path) =>
+        path === '/onboarding/options'
+          ? new Promise<ApiResponse>((resolve) => (release = resolve))
+          : Promise.resolve(ok({ items: [] })),
     });
     renderWithProviders(<OnboardPage />);
 
@@ -345,7 +352,9 @@ describe('Onboard screen: success', () => {
     setup({ onboardingCreate: async () => ok(complete(), 201) });
     render(
       <QueryClientProvider client={client}>
-        <OnboardPage />
+        <MemoryRouter>
+          <OnboardPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
     await fillForm();
@@ -489,7 +498,9 @@ describe('Onboard screen: errors from the API', () => {
     const api = setup({ onboardingCreate: async () => fail(503, 'unavailable') });
     render(
       <QueryClientProvider client={client}>
-        <OnboardPage />
+        <MemoryRouter>
+          <OnboardPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
     await fillForm();

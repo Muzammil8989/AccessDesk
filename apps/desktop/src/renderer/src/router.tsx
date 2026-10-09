@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 import { createHashRouter, Navigate, type RouteObject } from 'react-router';
 import { AppLayout } from '@/components/app-layout';
 import { RequireFeature } from '@/components/require-feature';
+import { ChecklistDetailPage } from '@/pages/checklist-detail-page';
+import { ChecklistsPage } from '@/pages/checklists-page';
 import { ComingSoonPage } from '@/pages/coming-soon-page';
 import { EmployeesPage } from '@/pages/employees-page';
 import { LoginPage } from '@/pages/login-page';
@@ -27,6 +29,11 @@ export const routes: RouteObject[] = [
       { index: true, element: <Navigate to="/employees" replace /> },
       { path: 'employees', element: guarded('employees', <EmployeesPage />) },
       { path: 'onboard', element: guarded('onboard', <OnboardPage />) },
+      { path: 'onboard/checklists', element: guarded('onboard', <ChecklistsPage />) },
+      {
+        path: 'onboard/checklists/:subjectId',
+        element: guarded('onboard', <ChecklistDetailPage />),
+      },
       {
         path: 'offboard',
         element: guarded(

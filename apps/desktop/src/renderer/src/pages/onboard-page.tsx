@@ -1,13 +1,16 @@
 import {
   canAccess,
+  templateViolation,
   type OnboardEmployee,
   type OnboardResult,
   type OnboardingOptions,
   type RetryOnboarding,
+  type Template,
 } from '@accessdesk/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { OnboardForm, type SubmitFailure } from '@/components/onboard-form';
+import { Link } from 'react-router';
+import { OnboardForm, type SubmitFailure, type TemplatesState } from '@/components/onboard-form';
 import { OnboardResultView, type OnboardSummary } from '@/components/onboard-result';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -17,6 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ApiRequestError } from '@/lib/api';
 import { createOnboarding, onboardingOptionsQuery, retryOnboarding } from '@/lib/onboarding-api';
 import { authQuery } from '@/lib/session';
+import { templatesQuery } from '@/lib/templates-api';
 
 interface OnboardSession {
   result: OnboardResult;
@@ -41,14 +45,20 @@ function describeFailure(error: unknown): SubmitFailure {
   return { message: error.message };
 }
 
-function summaryOf(values: OnboardEmployee, options: OnboardingOptions): OnboardSummary {
+function summaryOf(
+  values: OnboardEmployee,
+  options: OnboardingOptions,
+  templates: readonly Template[],
+): OnboardSummary {
   const department = options.departments.find((item) => item.id === values.departmentGroupId);
+  const template = templates.find((item) => item.id === values.templateId);
   return {
     name: `${values.firstName} ${values.lastName}`,
     username: values.username,
     email: values.email,
     departmentName: department?.name ?? values.departmentGroupId,
     role: values.role,
+    ...(template && { templateName: template.name }),
   };
 }
 
@@ -56,6 +66,7 @@ export function OnboardPage() {
   const queryClient = useQueryClient();
   const auth = useQuery(authQuery);
   const options = useQuery(onboardingOptionsQuery);
+  const templates = useQuery(templatesQuery);
   const [session, setSession] = useState<OnboardSession | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
 
@@ -77,8 +88,12 @@ export function OnboardPage() {
       setSession({
         result,
         password: result.temporaryPassword ?? null,
-        summary: summaryOf(values, options.data),
-        retryInput: { departmentGroupId: values.departmentGroupId, role: values.role },
+        summary: summaryOf(values, options.data, templates.data?.items ?? []),
+        retryInput: {
+          departmentGroupId: values.departmentGroupId,
+          role: values.role,
+          ...(values.templateId && { templateId: values.templateId }),
+        },
       });
       return null;
     } catch (error) {
@@ -117,9 +132,28 @@ export function OnboardPage() {
     auth.data?.superAdminRole,
   );
 
+  const templatesState: TemplatesState = templates.isPending
+    ? 'loading'
+    : templates.isError
+      ? 'error'
+      : 'ready';
+  const templateBlockedReason = (template: Template) =>
+    templateViolation(template, auth.data?.roles ?? [], {
+      adminRoles: auth.data?.adminRoles ?? [],
+      superAdminRole: auth.data?.superAdminRole ?? '',
+    });
+
   return (
     <div className="flex max-w-2xl flex-col gap-6">
-      <PageHeader title="Onboard" description="Add a new person to the company." />
+      <PageHeader
+        title="Onboard"
+        description="Add a new person to the company."
+        actions={
+          <Button asChild variant="outline">
+            <Link to="/onboard/checklists">Open checklists</Link>
+          </Button>
+        }
+      />
 
       {session ? (
         <OnboardResultView
@@ -178,6 +212,9 @@ export function OnboardPage() {
               <OnboardForm
                 options={options.data}
                 canAssignAdmin={canAssignAdmin}
+                templates={templates.data?.items ?? []}
+                templatesState={templatesState}
+                templateBlockedReason={templateBlockedReason}
                 onSubmit={submit}
               />
             )}

@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ChecklistPanel } from '@/components/checklist-panel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
@@ -24,6 +25,7 @@ export interface OnboardSummary {
   email: string;
   departmentName: string;
   role: string;
+  templateName?: string;
 }
 
 interface OnboardResultViewProps {
@@ -139,6 +141,10 @@ export function OnboardResultView({
 }: OnboardResultViewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const complete = result.status === 'complete';
+  const checklistStep = result.steps.find((step) => step.name === 'create_checklist');
+  const showChecklist =
+    checklistStep !== undefined &&
+    (checklistStep.status === 'done' || (checklistStep.status === 'skipped' && complete));
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -177,6 +183,12 @@ export function OnboardResultView({
           <dd className="font-medium break-words">{summary.departmentName}</dd>
           <dt className="text-muted-foreground">Role</dt>
           <dd className="font-medium break-words">{summary.role}</dd>
+          {summary.templateName && (
+            <>
+              <dt className="text-muted-foreground">Template</dt>
+              <dd className="font-medium break-words">{summary.templateName}</dd>
+            </>
+          )}
         </dl>
 
         <ul aria-label="Onboarding steps" className="flex flex-col gap-2">
@@ -204,6 +216,13 @@ export function OnboardResultView({
         </ul>
 
         {password && <PasswordBlock password={password} />}
+
+        {showChecklist && <ChecklistPanel subjectId={result.subjectId} headingLevel={3} />}
+        {checklistStep && !showChecklist && (
+          <p className="text-sm text-muted-foreground">
+            The checklist is created once every step has finished.
+          </p>
+        )}
 
         {retryError && (
           <Alert variant="destructive" role="alert">
