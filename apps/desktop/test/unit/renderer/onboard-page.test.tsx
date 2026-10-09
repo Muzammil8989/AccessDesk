@@ -26,8 +26,8 @@ const fail = (status: number, message: string, code?: string): ApiResponse => ({
 
 const hrOptions = {
   departments: [
-    { id: 'g-eng', name: 'Engineering' },
-    { id: 'g-sales', name: 'Sales' },
+    { id: 'g-eng', name: 'Engineering', path: '/Engineering' },
+    { id: 'g-sales', name: 'Sales', path: '/Sales' },
   ],
   roles: [
     { name: 'member', allowed: true },

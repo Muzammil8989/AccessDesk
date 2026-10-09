@@ -1,15 +1,18 @@
 import { IdentityProviderError, type IdentityProvider } from '@accessdesk/identity';
 import {
-  canAssignRole,
   roleOptions,
+  roleViolation,
+  templateViolation,
   type OnboardEmployee,
   type OnboardResult,
-  type OnboardableRole,
   type OnboardingOptions,
   type RetryOnboarding,
+  type RolePolicy,
+  type Template,
 } from '@accessdesk/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { AuditReader, AuditWriter } from '../audit/audit.repository';
+import type { TemplateRepository } from '../templates/templates.repository';
 import { createAuditingObserver, ONBOARDING_AUDIT_ACTIONS } from './onboarding.audit';
 import { onboardingErrors } from './onboarding.errors';
 import { runSteps, type OnboardingStep } from './onboarding.runner';
@@ -21,14 +24,17 @@ import {
   requireSubject,
   type Department,
 } from './onboarding.steps';
+import { templateSteps } from './onboarding.template-steps';
 
 export const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export interface OnboardingServiceDeps {
   identity: IdentityProvider;
   audit: AuditWriter & AuditReader;
+  templates: Pick<TemplateRepository, 'findById'>;
   clock: () => Date;
   generatePassword: () => string;
+  adminRoles: readonly string[];
   superAdminRole: string;
 }
 
@@ -42,19 +48,24 @@ export interface Caller {
 export class OnboardingService {
   constructor(private readonly deps: OnboardingServiceDeps) {}
 
+  private get policy(): RolePolicy {
+    return { adminRoles: this.deps.adminRoles, superAdminRole: this.deps.superAdminRole };
+  }
+
   async getOptions(caller: Pick<Caller, 'roles'>): Promise<OnboardingOptions> {
     const groups = await this.deps.identity.listGroups();
     return {
       departments: groups
-        .map(({ id, name }) => ({ id, name }))
+        .map(({ id, name, path }) => ({ id, name, path }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-      roles: roleOptions(caller.roles, this.deps.superAdminRole),
+      roles: roleOptions(caller.roles, this.policy),
     };
   }
 
   async onboard(input: OnboardEmployee, caller: Caller): Promise<OnboardResult> {
     const { identity } = this.deps;
     this.assertRoleAllowed(caller, input.role);
+    const template = await this.loadTemplate(input.templateId, caller);
 
     const [groups, sameUsername, sameEmail] = await Promise.all([
       identity.listGroups(),
@@ -72,6 +83,9 @@ export class OnboardingService {
         createUserStep(identity, input, temporaryPassword),
         addToGroupStep(identity, department, false),
         assignRoleStep(identity, input.role, false),
+        ...(template
+          ? templateSteps({ identity, template, groups, department, role: input.role })
+          : []),
       ],
       context,
       this.observerFor(caller),
@@ -91,6 +105,7 @@ export class OnboardingService {
   async retry(subjectId: string, input: RetryOnboarding, caller: Caller): Promise<OnboardResult> {
     const { identity, audit, clock } = this.deps;
     this.assertRoleAllowed(caller, input.role);
+    const template = await this.loadTemplate(input.templateId, caller);
 
     const [groups, createdByCaller] = await Promise.all([
       identity.listGroups(),
@@ -120,6 +135,17 @@ export class OnboardingService {
         input.role,
         roles.some((role) => role.name === input.role),
       ),
+      ...(template
+        ? templateSteps({
+            identity,
+            template,
+            groups,
+            department,
+            role: input.role,
+            memberships,
+            assignedRoles: roles,
+          })
+        : []),
     ];
     const outcome = await runSteps(steps, { subjectId }, this.observerFor(caller));
 
@@ -130,10 +156,21 @@ export class OnboardingService {
     };
   }
 
-  private assertRoleAllowed(caller: Pick<Caller, 'roles'>, role: OnboardableRole): void {
-    if (!canAssignRole(caller.roles, role, this.deps.superAdminRole)) {
-      throw onboardingErrors.roleNotAllowed();
-    }
+  private assertRoleAllowed(caller: Pick<Caller, 'roles'>, role: string): void {
+    const reason = roleViolation(role, caller.roles, this.policy);
+    if (reason !== null) throw onboardingErrors.roleNotAllowed(reason);
+  }
+
+  private async loadTemplate(
+    templateId: string | undefined,
+    caller: Pick<Caller, 'roles'>,
+  ): Promise<Template | null> {
+    if (templateId === undefined) return null;
+    const template = await this.deps.templates.findById(templateId);
+    if (!template) throw onboardingErrors.unknownTemplate();
+    const reason = templateViolation(template, caller.roles, this.policy);
+    if (reason !== null) throw onboardingErrors.templateNotAllowed(reason);
+    return template;
   }
 
   private findDepartment(groups: readonly Department[], departmentGroupId: string): Department {

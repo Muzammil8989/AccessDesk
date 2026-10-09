@@ -70,12 +70,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   healthRoutes(app, { checkDatabase: deps.checkDatabase });
   templateRoutes(app, deps.templates);
+  const clock = deps.clock ?? (() => new Date());
   employeeRoutes(app, { identityFor: deps.identityFor });
   onboardingRoutes(app, {
     identityFor: deps.identityFor,
     audit: deps.audit,
-    clock: deps.clock ?? (() => new Date()),
+    templates: deps.templates,
+    clock,
     generatePassword: deps.generatePassword ?? generateTemporaryPassword,
+    adminRoles: config.adminRoles,
     superAdminRole: config.superAdminRole,
   });
 

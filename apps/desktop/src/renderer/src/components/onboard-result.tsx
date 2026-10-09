@@ -40,6 +40,9 @@ const STEP_LABELS: Record<OnboardingStepName, string> = {
   create_user: 'Create the account',
   add_to_group: 'Add to the department',
   assign_role: 'Assign the role',
+  template_add_to_group: 'Add to the template group',
+  template_assign_role: 'Assign the template role',
+  create_checklist: 'Create the checklist',
 };
 
 const STATUS_BADGES: Record<
@@ -177,15 +180,16 @@ export function OnboardResultView({
         </dl>
 
         <ul aria-label="Onboarding steps" className="flex flex-col gap-2">
-          {result.steps.map((step) => {
+          {result.steps.map((step, index) => {
             const badge = STATUS_BADGES[step.status];
             return (
               <li
-                key={step.name}
+                key={`${step.name}-${index}`}
                 className="flex items-center justify-between gap-4 rounded-lg border px-4 py-3 text-sm"
               >
                 <div className="min-w-0">
                   <span className="font-medium">{STEP_LABELS[step.name]}</span>
+                  {step.label && <span className="ml-2 font-mono text-xs">{step.label}</span>}
                   {step.message && (
                     <span className="mt-0.5 block text-muted-foreground">{step.message}</span>
                   )}

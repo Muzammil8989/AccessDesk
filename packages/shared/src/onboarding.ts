@@ -1,10 +1,17 @@
 import { z } from 'zod';
-import { canAccess } from './permissions';
+import { ADMIN_ROLE_REASON, roleViolation, type RolePolicy } from './role-policy';
 
 export const ONBOARDABLE_ROLES = ['member', 'manager', 'admin'] as const;
 export type OnboardableRole = (typeof ONBOARDABLE_ROLES)[number];
 
-export const ONBOARDING_STEP_NAMES = ['create_user', 'add_to_group', 'assign_role'] as const;
+export const ONBOARDING_STEP_NAMES = [
+  'create_user',
+  'add_to_group',
+  'assign_role',
+  'template_add_to_group',
+  'template_assign_role',
+  'create_checklist',
+] as const;
 export type OnboardingStepName = (typeof ONBOARDING_STEP_NAMES)[number];
 
 export const ONBOARDING_ERROR_CODES = {
@@ -37,6 +44,7 @@ export const onboardEmployeeSchema = z.object({
     .regex(USERNAME_PATTERN, 'Use 3 to 64 letters, numbers, dots, dashes or underscores'),
   departmentGroupId: z.string().min(1, 'Choose a department'),
   role: roleSchema,
+  templateId: z.uuid().optional(),
 });
 export type OnboardEmployeeInput = z.input<typeof onboardEmployeeSchema>;
 export type OnboardEmployee = z.infer<typeof onboardEmployeeSchema>;
@@ -44,6 +52,7 @@ export type OnboardEmployee = z.infer<typeof onboardEmployeeSchema>;
 export const retryOnboardingSchema = onboardEmployeeSchema.pick({
   departmentGroupId: true,
   role: true,
+  templateId: true,
 });
 export type RetryOnboarding = z.infer<typeof retryOnboardingSchema>;
 
@@ -53,6 +62,7 @@ export const onboardStepSchema = z.object({
   name: z.enum(ONBOARDING_STEP_NAMES),
   status: z.enum(['done', 'failed', 'skipped']),
   message: z.string().optional(),
+  label: z.string().optional(),
 });
 export type OnboardStep = z.infer<typeof onboardStepSchema>;
 
@@ -65,7 +75,7 @@ export const onboardResultSchema = z.object({
 export type OnboardResult = z.infer<typeof onboardResultSchema>;
 
 export const onboardingOptionsSchema = z.object({
-  departments: z.array(z.object({ id: z.string().min(1), name: z.string() })),
+  departments: z.array(z.object({ id: z.string().min(1), name: z.string(), path: z.string() })),
   roles: z.array(
     z.object({
       name: roleSchema,
@@ -76,23 +86,22 @@ export const onboardingOptionsSchema = z.object({
 });
 export type OnboardingOptions = z.infer<typeof onboardingOptionsSchema>;
 
-export const ADMIN_ROLE_REASON = 'Only a super-admin can assign the admin role';
+export { ADMIN_ROLE_REASON };
 
 export function canAssignRole(
   callerRoles: readonly string[],
-  role: OnboardableRole,
-  superAdminRole: string,
+  role: string,
+  policy: RolePolicy,
 ): boolean {
-  return role !== 'admin' || canAccess(callerRoles, 'onboard-assign-admin', [], superAdminRole);
+  return roleViolation(role, callerRoles, policy) === null;
 }
 
 export function roleOptions(
   callerRoles: readonly string[],
-  superAdminRole: string,
+  policy: RolePolicy,
 ): OnboardingOptions['roles'] {
-  return ONBOARDABLE_ROLES.map((name) =>
-    canAssignRole(callerRoles, name, superAdminRole)
-      ? { name, allowed: true }
-      : { name, allowed: false, reason: ADMIN_ROLE_REASON },
-  );
+  return ONBOARDABLE_ROLES.map((name) => {
+    const reason = roleViolation(name, callerRoles, policy);
+    return reason === null ? { name, allowed: true } : { name, allowed: false, reason };
+  });
 }

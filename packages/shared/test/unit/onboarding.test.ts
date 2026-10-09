@@ -8,7 +8,13 @@ import {
   onboardingSubjectParamsSchema,
   retryOnboardingSchema,
   roleOptions,
+  type RolePolicy,
 } from '../../src/index';
+
+const policy: RolePolicy = {
+  adminRoles: ['super-admin', 'hr-admin'],
+  superAdminRole: 'super-admin',
+};
 
 const valid = {
   firstName: 'Ann',
@@ -69,6 +75,12 @@ describe('onboardEmployeeSchema', () => {
     expect(onboardEmployeeSchema.safeParse({ ...valid, username }).success).toBe(true);
   });
 
+  it('accepts an optional template id and rejects one that is not a UUID', () => {
+    const templateId = '8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11';
+    expect(onboardEmployeeSchema.parse({ ...valid, templateId })).toEqual({ ...valid, templateId });
+    expect(onboardEmployeeSchema.safeParse({ ...valid, templateId: '../x' }).success).toBe(false);
+  });
+
   it('requires a department', () => {
     expect(onboardEmployeeSchema.safeParse({ ...valid, departmentGroupId: '' }).success).toBe(
       false,
@@ -89,11 +101,15 @@ describe('onboardEmployeeSchema', () => {
 });
 
 describe('retryOnboardingSchema', () => {
-  it('needs only a department and a role, and never allows owner', () => {
+  it('needs only a department, a role and the optional template, and never allows owner', () => {
     expect(retryOnboardingSchema.parse({ departmentGroupId: 'g', role: 'manager' })).toEqual({
       departmentGroupId: 'g',
       role: 'manager',
     });
+    const templateId = '8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11';
+    expect(
+      retryOnboardingSchema.parse({ departmentGroupId: 'g', role: 'manager', templateId }),
+    ).toEqual({ departmentGroupId: 'g', role: 'manager', templateId });
     expect(retryOnboardingSchema.safeParse({ departmentGroupId: 'g', role: 'owner' }).success).toBe(
       false,
     );
@@ -136,6 +152,20 @@ describe('onboardResultSchema', () => {
     ).toBe(true);
   });
 
+  it('accepts the template and checklist steps, with an optional label', () => {
+    expect(
+      onboardResultSchema.safeParse({
+        status: 'partial',
+        subjectId: 's1',
+        steps: [
+          { name: 'template_add_to_group', status: 'done', label: '/Engineering' },
+          { name: 'template_assign_role', status: 'failed', label: 'developer', message: 'nope' },
+          { name: 'create_checklist', status: 'skipped' },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
   it.each([
     { status: 'unknown', subjectId: 's', steps: [] },
     { status: 'complete', subjectId: '', steps: [] },
@@ -150,8 +180,8 @@ describe('onboardingOptionsSchema', () => {
   it('accepts departments and role options', () => {
     expect(
       onboardingOptionsSchema.safeParse({
-        departments: [{ id: 'g1', name: 'Engineering' }],
-        roles: roleOptions(['hr-admin'], 'super-admin'),
+        departments: [{ id: 'g1', name: 'Engineering', path: '/Engineering' }],
+        roles: roleOptions(['hr-admin'], policy),
       }).success,
     ).toBe(true);
   });
@@ -159,23 +189,36 @@ describe('onboardingOptionsSchema', () => {
 
 describe('role policy', () => {
   it('lets anyone assign member and manager', () => {
-    expect(canAssignRole([], 'member', 'super-admin')).toBe(true);
-    expect(canAssignRole(['hr-admin'], 'manager', 'super-admin')).toBe(true);
+    expect(canAssignRole([], 'member', policy)).toBe(true);
+    expect(canAssignRole(['hr-admin'], 'manager', policy)).toBe(true);
   });
 
   it('lets only the configured super-admin role assign admin', () => {
-    expect(canAssignRole(['super-admin'], 'admin', 'super-admin')).toBe(true);
-    expect(canAssignRole(['hr-admin'], 'admin', 'super-admin')).toBe(false);
-    expect(canAssignRole(['super-admin'], 'admin', 'it-owner')).toBe(false);
-    expect(canAssignRole(['it-owner'], 'admin', 'it-owner')).toBe(true);
+    expect(canAssignRole(['super-admin'], 'admin', policy)).toBe(true);
+    expect(canAssignRole(['hr-admin'], 'admin', policy)).toBe(false);
+    expect(canAssignRole(['super-admin'], 'admin', { ...policy, superAdminRole: 'it-owner' })).toBe(
+      false,
+    );
+    expect(canAssignRole(['it-owner'], 'admin', { ...policy, superAdminRole: 'it-owner' })).toBe(
+      true,
+    );
   });
 
   it('describes every role, with a reason only when one is not allowed', () => {
-    expect(roleOptions(['hr-admin'], 'super-admin')).toEqual([
+    expect(roleOptions(['hr-admin'], policy)).toEqual([
       { name: 'member', allowed: true },
       { name: 'manager', allowed: true },
       { name: 'admin', allowed: false, reason: ADMIN_ROLE_REASON },
     ]);
-    expect(roleOptions(['super-admin'], 'super-admin').every((role) => role.allowed)).toBe(true);
+    expect(roleOptions(['super-admin'], policy).every((role) => role.allowed)).toBe(true);
+  });
+
+  it('also refuses a form role that the configuration makes privileged', () => {
+    const odd: RolePolicy = { adminRoles: ['manager'], superAdminRole: 'super-admin' };
+    expect(roleOptions(['hr-admin'], odd)).toEqual([
+      { name: 'member', allowed: true },
+      { name: 'manager', allowed: false, reason: 'Only a super-admin can assign the manager role' },
+      { name: 'admin', allowed: false, reason: ADMIN_ROLE_REASON },
+    ]);
   });
 });

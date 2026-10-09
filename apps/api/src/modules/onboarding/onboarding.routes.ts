@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { IdentityProviderFactory } from '../../infra/identity';
 import { requireAuth } from '../../plugins/auth';
 import type { AuditRepository } from '../audit/audit.repository';
+import type { TemplateRepository } from '../templates/templates.repository';
 import { OnboardingService, type Caller } from './onboarding.service';
 
 export const ONBOARDING_RATE_LIMIT = {
@@ -21,8 +22,10 @@ const ROUTE_CONFIG = { rateLimit: ONBOARDING_RATE_LIMIT } as const;
 export interface OnboardingRouteDeps {
   identityFor: IdentityProviderFactory;
   audit: AuditRepository;
+  templates: TemplateRepository;
   clock: () => Date;
   generatePassword: () => string;
+  adminRoles: readonly string[];
   superAdminRole: string;
 }
 
@@ -31,8 +34,10 @@ export function onboardingRoutes(app: FastifyInstance, deps: OnboardingRouteDeps
     new OnboardingService({
       identity: deps.identityFor(requireAuth(request).token),
       audit: deps.audit,
+      templates: deps.templates,
       clock: deps.clock,
       generatePassword: deps.generatePassword,
+      adminRoles: deps.adminRoles,
       superAdminRole: deps.superAdminRole,
     });
 

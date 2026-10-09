@@ -1,8 +1,10 @@
-import { ADMIN_ROLE_REASON, ONBOARDING_ERROR_CODES } from '@accessdesk/shared';
+import { ONBOARDING_ERROR_CODES } from '@accessdesk/shared';
 import { AppError } from '../../errors';
 
 export const onboardingErrors = {
-  roleNotAllowed: () => new AppError(403, 'forbidden', ADMIN_ROLE_REASON),
+  roleNotAllowed: (reason: string) => new AppError(403, 'forbidden', reason),
+  templateNotAllowed: (reason: string) => new AppError(403, 'forbidden', reason),
+  unknownTemplate: () => new AppError(400, 'bad_request', 'The selected template does not exist'),
   retryNotAllowed: () =>
     new AppError(403, 'forbidden', 'This onboarding cannot be retried from this account'),
   unknownDepartment: () =>
