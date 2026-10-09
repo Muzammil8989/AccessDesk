@@ -28,6 +28,8 @@ const apiGetSchema = z.object({
 
 const onboardingRetryCallSchema = z.object({ subjectId: z.string(), input: z.unknown() });
 
+const checklistClosedCallSchema = z.object({ subjectId: z.string(), input: z.unknown() });
+
 const checklistItemCallSchema = z.object({
   subjectId: z.string(),
   itemId: z.string(),
@@ -115,6 +117,12 @@ export function registerIpc(deps: IpcDeps): void {
     const parsed = onboardingRetryCallSchema.safeParse(payload);
     if (!parsed.success) return { ok: false, status: 400, message: 'Invalid request' } as const;
     return deps.api.retryOnboarding(parsed.data.subjectId, parsed.data.input);
+  });
+
+  handle(IPC.apiChecklistClosedSet, async (payload: unknown) => {
+    const parsed = checklistClosedCallSchema.safeParse(payload);
+    if (!parsed.success) return { ok: false, status: 400, message: 'Invalid request' } as const;
+    return deps.api.setChecklistClosed(parsed.data.subjectId, parsed.data.input);
   });
 
   handle(IPC.apiChecklistItemSet, async (payload: unknown) => {

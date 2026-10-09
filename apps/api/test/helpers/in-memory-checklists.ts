@@ -2,6 +2,8 @@ import type { ListChecklistsQuery } from '@accessdesk/shared';
 import type { AuditWriter } from '../../src/modules/audit/audit.repository';
 import type {
   ChecklistRepository,
+  ClosedChange,
+  ClosedResult,
   ItemChange,
   NewChecklist,
   StoredChecklist,
@@ -17,6 +19,8 @@ export interface StoredRow {
   createdAt: Date;
   completedAt: Date | null;
   status: 'open' | 'done' | 'cancelled';
+  managerSubjectId: string | null;
+  startDate: string | null;
   items: (StoredChecklistItem & { completedBy: string | null })[];
 }
 
@@ -36,7 +40,12 @@ export class InMemoryChecklistRepository implements ChecklistRepository {
   seed(
     subjectId: string,
     titles: string[],
-    options: { createdAt?: Date; status?: StoredRow['status'] } = {},
+    options: {
+      createdAt?: Date;
+      status?: StoredRow['status'];
+      managerSubjectId?: string;
+      startDate?: string;
+    } = {},
   ): StoredRow {
     const row: StoredRow = {
       id: nextId(),
@@ -46,6 +55,8 @@ export class InMemoryChecklistRepository implements ChecklistRepository {
       createdAt: options.createdAt ?? new Date('2026-10-09T09:00:00.000Z'),
       completedAt: null,
       status: options.status ?? 'open',
+      managerSubjectId: options.managerSubjectId ?? null,
+      startDate: options.startDate ?? null,
       items: titles.map((title, position) => ({
         id: nextId(),
         title,
@@ -63,15 +74,16 @@ export class InMemoryChecklistRepository implements ChecklistRepository {
   async create(checklist: NewChecklist): Promise<void> {
     if (this.failCreate) throw new Error('checklist store unavailable');
     if (this.rows.some((row) => row.subjectId === checklist.subjectId)) return;
-    const empty = checklist.tasks.length === 0;
     this.rows.push({
       id: nextId(),
       subjectId: checklist.subjectId,
       templateId: checklist.templateId,
       createdBy: checklist.createdBy,
       createdAt: checklist.at,
-      completedAt: empty ? checklist.at : null,
-      status: empty ? 'done' : 'open',
+      completedAt: null,
+      status: 'open',
+      managerSubjectId: checklist.managerSubjectId,
+      startDate: checklist.startDate,
       items: checklist.tasks.map((task, position) => ({
         id: nextId(),
         title: task.title,
@@ -102,6 +114,8 @@ export class InMemoryChecklistRepository implements ChecklistRepository {
         completedAt: row.completedAt,
         totalCount: row.items.length,
         doneCount: row.items.filter((item) => item.status === 'done').length,
+        managerSubjectId: row.managerSubjectId,
+        startDate: row.startDate,
       }));
     return { items, total: matching.length };
   }
@@ -128,6 +142,18 @@ export class InMemoryChecklistRepository implements ChecklistRepository {
     return this.toStored(row);
   }
 
+  async setClosed(change: ClosedChange): Promise<ClosedResult> {
+    const row = this.rows.find((candidate) => candidate.subjectId === change.subjectId);
+    if (!row) return { result: 'not_found' };
+    if (row.items.length > 0) return { result: 'has_tasks' };
+
+    await this.audit.record(change.audit);
+
+    row.status = change.closed ? 'done' : 'open';
+    row.completedAt = change.closed ? change.at : null;
+    return { result: 'ok', checklist: this.toStored(row) };
+  }
+
   private toStored(row: StoredRow): StoredChecklist {
     return {
       subjectId: row.subjectId,
@@ -135,6 +161,8 @@ export class InMemoryChecklistRepository implements ChecklistRepository {
       createdAt: row.createdAt,
       completedAt: row.completedAt,
       templateName: row.templateId ? (this.templateNames[row.templateId] ?? null) : null,
+      managerSubjectId: row.managerSubjectId,
+      startDate: row.startDate,
       items: row.items.map(({ completedBy: _completedBy, ...item }) => ({ ...item })),
     };
   }

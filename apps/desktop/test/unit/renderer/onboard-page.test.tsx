@@ -721,3 +721,35 @@ describe('Onboard screen: partial result', () => {
     expect(screen.queryByText(PASSWORD)).not.toBeInTheDocument();
   });
 });
+
+describe('Onboard screen: summary and clearing', () => {
+  it('previews what will be created as the admin types', async () => {
+    setup();
+    renderWithProviders(<OnboardPage />);
+    await fillForm({ role: 'manager' });
+
+    const summary = screen.getByRole('complementary', { name: 'Summary' });
+    expect(within(summary).getByText('Ann Lee')).toBeInTheDocument();
+    expect(within(summary).getByText('Ann@Example.com')).toBeInTheDocument();
+    expect(within(summary).getByText('Ann.Lee')).toBeInTheDocument();
+    expect(within(summary).getByText('Engineering')).toBeInTheDocument();
+    expect(within(summary).getByText('Add them to Engineering as Manager')).toBeInTheDocument();
+  });
+
+  it('clears every field with "Clear form"', async () => {
+    setup();
+    renderWithProviders(<OnboardPage />);
+    const clear = await screen.findByRole('button', { name: 'Clear form' });
+    expect(clear).toBeDisabled();
+
+    await fillForm();
+    await userEvent.click(clear);
+
+    expect(screen.getByLabelText('First name')).toHaveValue('');
+    expect(screen.getByLabelText('First name')).toHaveFocus();
+    expect(screen.getByLabelText('Department')).toHaveValue('');
+    expect(
+      within(screen.getByRole('complementary', { name: 'Summary' })).getByText('New employee'),
+    ).toBeInTheDocument();
+  });
+});

@@ -12,6 +12,7 @@ export const IPC = {
   apiOnboardingCreate: 'api:onboarding-create',
   apiOnboardingRetry: 'api:onboarding-retry',
   apiChecklistItemSet: 'api:checklist-item-set',
+  apiChecklistClosedSet: 'api:checklist-closed-set',
 } as const;
 
 export interface AuthStatus {
@@ -61,6 +62,7 @@ export interface AccessDeskApi {
     };
     checklists: {
       setItem(subjectId: string, itemId: string, input: unknown): Promise<ApiResponse>;
+      setClosed(subjectId: string, input: unknown): Promise<ApiResponse>;
     };
   };
 }

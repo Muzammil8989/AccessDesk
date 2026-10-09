@@ -81,6 +81,44 @@ describe('onboardEmployeeSchema', () => {
     expect(onboardEmployeeSchema.safeParse({ ...valid, templateId: '../x' }).success).toBe(false);
   });
 
+  it('accepts an optional manager and start date', () => {
+    const managerSubjectId = '8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11';
+
+    expect(
+      onboardEmployeeSchema.parse({ ...valid, managerSubjectId, startDate: '2026-10-20' }),
+    ).toEqual({ ...valid, managerSubjectId, startDate: '2026-10-20' });
+    expect(onboardEmployeeSchema.parse(valid)).toEqual(valid);
+  });
+
+  it.each([
+    { managerSubjectId: '../x' },
+    { managerSubjectId: '' },
+    { startDate: '2026-02-30' },
+    { startDate: '20-10-2026' },
+    { startDate: '2026-10-20T10:00:00Z' },
+    { startDate: '' },
+    { startDate: 20261020 },
+  ])('rejects %j', (patch) => {
+    expect(onboardEmployeeSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
+  });
+
+  it('says what to do about a bad manager or date, in plain words', () => {
+    const manager = onboardEmployeeSchema.safeParse({ ...valid, managerSubjectId: 'x' });
+    const date = onboardEmployeeSchema.safeParse({ ...valid, startDate: 'soon' });
+
+    expect(manager.error?.issues[0]?.message).toBe('Choose a manager from the list');
+    expect(date.error?.issues[0]?.message).toBe('Enter a valid date');
+  });
+
+  it('accepts a leap day and refuses it in a year that has none', () => {
+    expect(onboardEmployeeSchema.safeParse({ ...valid, startDate: '2028-02-29' }).success).toBe(
+      true,
+    );
+    expect(onboardEmployeeSchema.safeParse({ ...valid, startDate: '2027-02-29' }).success).toBe(
+      false,
+    );
+  });
+
   it('requires a department', () => {
     expect(onboardEmployeeSchema.safeParse({ ...valid, departmentGroupId: '' }).success).toBe(
       false,
@@ -110,6 +148,24 @@ describe('retryOnboardingSchema', () => {
     expect(
       retryOnboardingSchema.parse({ departmentGroupId: 'g', role: 'manager', templateId }),
     ).toEqual({ departmentGroupId: 'g', role: 'manager', templateId });
+    const managerSubjectId = '8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11';
+    expect(
+      retryOnboardingSchema.parse({
+        departmentGroupId: 'g',
+        role: 'member',
+        managerSubjectId,
+        startDate: '2026-10-20',
+      }),
+    ).toEqual({
+      departmentGroupId: 'g',
+      role: 'member',
+      managerSubjectId,
+      startDate: '2026-10-20',
+    });
+    expect(
+      retryOnboardingSchema.safeParse({ departmentGroupId: 'g', role: 'member', startDate: 'soon' })
+        .success,
+    ).toBe(false);
     expect(retryOnboardingSchema.safeParse({ departmentGroupId: 'g', role: 'owner' }).success).toBe(
       false,
     );

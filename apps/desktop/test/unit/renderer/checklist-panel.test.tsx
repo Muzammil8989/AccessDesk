@@ -28,6 +28,8 @@ const detail = (items: unknown[], overrides: Record<string, unknown> = {}) => ({
   completedAt: null,
   templateName: 'Developer',
   person: { displayName: 'Ann Lee', username: 'ann.lee' },
+  manager: null,
+  startDate: null,
   items,
   ...overrides,
 });
@@ -97,6 +99,18 @@ describe('ChecklistPanel: reading', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
+  it('says so, and offers to mark it done, for a checklist with no tasks that is still open', async () => {
+    setup({}, detail([], { startDate: '2026-10-20' }));
+    renderWithProviders(<ChecklistPanel subjectId={SUBJECT} />);
+
+    expect(await screen.findByText('This checklist has no tasks.')).toBeInTheDocument();
+    expect(
+      screen.getByText('It stays in the Open list until you mark it as done.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mark as done' })).toBeInTheDocument();
+    expect(screen.queryByText('Marked as done')).not.toBeInTheDocument();
+  });
+
   it('shows a loading state first', async () => {
     setup({ apiGet: () => new Promise<ApiResponse>(() => undefined) });
     renderWithProviders(<ChecklistPanel subjectId={SUBJECT} />);
@@ -128,6 +142,97 @@ describe('ChecklistPanel: reading', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(await screen.findByRole('checkbox', { name: 'Order laptop' })).toBeInTheDocument();
+  });
+});
+
+describe('ChecklistPanel: a checklist with no tasks', () => {
+  const empty = () => detail([], { startDate: '2026-10-20' });
+
+  it('marks it as done with one click, announces it, and refreshes the lists', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const api = setup(
+      {
+        checklistSetClosed: async () =>
+          ok(detail([], { status: 'done', completedAt: '2026-10-09T13:00:00.000Z' })),
+      },
+      empty(),
+    );
+    render(
+      <QueryClientProvider client={client}>
+        <ChecklistPanel subjectId={SUBJECT} />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Mark as done' }));
+
+    expect(await screen.findByText('Marked as done')).toBeInTheDocument();
+    expect(api.api.checklists.setClosed).toHaveBeenCalledWith(SUBJECT, { closed: true });
+    expect(screen.getByRole('button', { name: 'Reopen checklist' })).toBeInTheDocument();
+    expect(screen.getByText('Checklist marked as done.')).toHaveClass('sr-only');
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['checklists'] });
+  });
+
+  it('reopens a closed checklist', async () => {
+    const api = setup(
+      { checklistSetClosed: async () => ok(empty()) },
+      detail([], { status: 'done' }),
+    );
+    renderWithProviders(<ChecklistPanel subjectId={SUBJECT} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Reopen checklist' }));
+
+    await waitFor(() =>
+      expect(api.api.checklists.setClosed).toHaveBeenCalledWith(SUBJECT, { closed: false }),
+    );
+    expect(await screen.findByRole('button', { name: 'Mark as done' })).toBeInTheDocument();
+    expect(screen.getByText('Checklist reopened.')).toBeInTheDocument();
+  });
+
+  it('says it could not confirm the change, and shows what is saved, when closing fails', async () => {
+    setup({ checklistSetClosed: async () => fail(500, 'Internal server error') }, empty());
+    renderWithProviders(<ChecklistPanel subjectId={SUBJECT} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Mark as done' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not confirm the change.');
+    expect(alert).toHaveTextContent('Internal server error');
+    expect(screen.getByRole('button', { name: 'Mark as done' })).toBeInTheDocument();
+  });
+
+  it('ignores a second click while the first is still saving', async () => {
+    let finish: (response: ApiResponse) => void = () => undefined;
+    const api = setup(
+      { checklistSetClosed: () => new Promise<ApiResponse>((resolve) => (finish = resolve)) },
+      empty(),
+    );
+    renderWithProviders(<ChecklistPanel subjectId={SUBJECT} />);
+    const button = await screen.findByRole('button', { name: 'Mark as done' });
+
+    await userEvent.click(button);
+    await userEvent.click(button);
+
+    expect(api.api.checklists.setClosed).toHaveBeenCalledTimes(1);
+    finish(ok(detail([], { status: 'done' })));
+    expect(await screen.findByText('Marked as done')).toBeInTheDocument();
+  });
+
+  it('refreshes the lists after a tick as well, so the progress is not out of date', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    setup({
+      checklistSetItem: async () => ok(detail([task(LAPTOP, 'Order laptop', { status: 'done' })])),
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <ChecklistPanel subjectId={SUBJECT} />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Order laptop' }));
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['checklists'] }));
   });
 });
 

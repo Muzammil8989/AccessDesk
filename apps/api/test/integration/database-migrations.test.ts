@@ -312,6 +312,37 @@ describe.skipIf(!adminUrl)('database migrations', () => {
     });
   });
 
+  describe('checklist manager and start date', () => {
+    it('adds a nullable text column for the manager and a nullable date column for the start date', async () => {
+      const { rows } = await db.query(
+        `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+         WHERE table_name = 'employee_checklists'
+           AND column_name IN ('manager_subject_id', 'start_date') ORDER BY column_name`,
+      );
+      expect(rows).toEqual([
+        { column_name: 'manager_subject_id', data_type: 'text', is_nullable: 'YES' },
+        { column_name: 'start_date', data_type: 'date', is_nullable: 'YES' },
+      ]);
+    });
+
+    it('leaves existing checklists without a manager or a start date', async () => {
+      const { rows } = await db.query(
+        `SELECT manager_subject_id, start_date FROM employee_checklists WHERE id = $1`,
+        [LEGACY_CHECKLIST_ID],
+      );
+      expect(rows).toEqual([{ manager_subject_id: null, start_date: null }]);
+    });
+
+    it('stores a start date as a plain calendar date, with no time or time zone', async () => {
+      const { rows } = await db.query(
+        `INSERT INTO employee_checklists (id, subject_id, type, created_by, manager_subject_id, start_date)
+         VALUES (gen_random_uuid(), 'dated-subject', 'ONBOARDING', 'admin-1', 'm-1', '2026-12-31')
+         RETURNING start_date::text AS start_date, manager_subject_id`,
+      );
+      expect(rows).toEqual([{ start_date: '2026-12-31', manager_subject_id: 'm-1' }]);
+    });
+  });
+
   describe('one checklist per subject and type', () => {
     it('refuses a second onboarding checklist for the same subject', async () => {
       const error = await errorOf(

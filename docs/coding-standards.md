@@ -271,6 +271,7 @@ sophisticated. Each entry says what problem it solves and where you can see it.
 export interface TemplateRepository {
   /** All templates, by name, each with its items in order. */
   listWithItems(): Promise<Template[]>;
+  findById(id: string): Promise<Template | null>;
 }
 ```
 
@@ -391,14 +392,15 @@ When adding a file, copy the style of its neighbours. Do not rename existing fil
 
 ### 5.5 Comments
 
-This repository has **no comments in source code**: no `//`, no `/* */`, no JSDoc. The only exception is
-a comment that tools read, such as `/// <reference ... />` or an `eslint-disable` directive. Put the
-reasoning somewhere else:
+Comments are rare, and they explain **why**, never what. Most code needs none:
 
 - Make the code say it: clear names, small functions, types that carry the contract.
 - Explain a decision in an ADR (`docs/adr`), a limit or a reason in the docs, and a one-off reason in
   the commit message or pull request.
 - A test name that reads as a sentence documents behaviour better than a comment does.
+- Write a comment only where the reason is not obvious from the code: a rule that looks odd (the row
+  lock before a tick), a trap in a library, or a contract a type cannot carry. Keep it short.
+- A comment that tools read, such as `/// <reference ... />` or an `eslint-disable` directive, is fine.
 
 Delete commented-out code; Git remembers it.
 
@@ -527,5 +529,5 @@ Before asking for review:
 - [ ] No tokens, secrets or personal data in logs, tests or commits.
 - [ ] New behaviour has tests, including the failure path; a bug fix has a test that failed before.
 - [ ] UI changes handle loading, error and empty states and work with the keyboard.
-- [ ] No comments in code. No dead code, no `console.log`, no unexplained `any` or `as`.
+- [ ] Comments only for the "why". No dead code, no `console.log`, no unexplained `any` or `as`.
 - [ ] Docs or an ADR updated if a decision or a command changed.

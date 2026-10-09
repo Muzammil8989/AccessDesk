@@ -9,24 +9,25 @@
 
 ## Commands
 
-| Command              | What it does                                                                 |
-| -------------------- | ---------------------------------------------------------------------------- |
-| `pnpm setup`         | One-time: create `.env`, start PostgreSQL, migrate, seed                     |
-| `pnpm dev:all`       | Start the database, apply migrations, then run the API and the app           |
-| `pnpm dev`           | Run the API and the desktop app (database must already be running)           |
-| `pnpm check`         | Everything CI runs: lint, naming check, format check, typecheck, test, build |
-| `pnpm test`          | Unit and integration tests in every package                                  |
-| `pnpm test:coverage` | The same, with a coverage report and minimum thresholds                      |
-| `pnpm test:e2e`      | Build, then run the end-to-end test (opens the app window)                   |
-| `pnpm lint`          | ESLint, including type-aware, accessibility and boundary rules               |
-| `pnpm check:naming`  | Fails if the provider name appears outside the allowlist (ADR 0009)          |
-| `pnpm typecheck`     | TypeScript strict mode in every package                                      |
-| `pnpm build`         | Build everything                                                             |
-| `pnpm audit`         | Check dependencies for known vulnerabilities                                 |
-| `pnpm format`        | Prettier                                                                     |
-| `pnpm db:up/down`    | Start or stop PostgreSQL                                                     |
-| `pnpm db:migrate`    | Create and apply a new migration after editing `schema.prisma`               |
-| `pnpm clean`         | Remove build output (`pnpm clean --deps` also removes `node_modules`)        |
+| Command                                   | What it does                                                                 |
+| ----------------------------------------- | ---------------------------------------------------------------------------- |
+| `pnpm setup`                              | One-time: create `.env`, start PostgreSQL, migrate, seed                     |
+| `pnpm dev:all`                            | Start the database, apply migrations, then run the API and the app           |
+| `pnpm dev`                                | Run the API and the desktop app (database must already be running)           |
+| `pnpm check`                              | Everything CI runs: lint, naming check, format check, typecheck, test, build |
+| `pnpm test`                               | Unit and integration tests in every package                                  |
+| `pnpm test:coverage`                      | The same, with a coverage report and minimum thresholds                      |
+| `pnpm test:e2e`                           | Build, then run the end-to-end test (opens the app window)                   |
+| `pnpm lint`                               | ESLint, including type-aware, accessibility and boundary rules               |
+| `pnpm check:naming`                       | Fails if the provider name appears outside the allowlist (ADR 0009)          |
+| `pnpm typecheck`                          | TypeScript strict mode in every package                                      |
+| `pnpm build`                              | Build everything                                                             |
+| `pnpm audit`                              | Check dependencies for known vulnerabilities                                 |
+| `pnpm format`                             | Prettier                                                                     |
+| `pnpm db:up/down`                         | Start or stop PostgreSQL                                                     |
+| `pnpm db:migrate`                         | Create and apply a new migration after editing `schema.prisma`               |
+| `pnpm --filter @accessdesk/api db:deploy` | Apply existing migrations to a database (do this after pulling)              |
+| `pnpm clean`                              | Remove build output (`pnpm clean --deps` also removes `node_modules`)        |
 
 Git hooks (Husky): `pre-commit` lints and formats staged files, `pre-push` runs typecheck and tests.
 
@@ -90,17 +91,20 @@ accessdesk/
 │   │   │   │                     (identity.ts: the factory type and the adapter choice), job queue (stub)
 │   │   │   ├── modules/          one folder per feature, each with its own layers
 │   │   │   │   ├── audit/        audit repository interface and its Prisma implementation
+│   │   │   │   ├── checklists/   routes, service, repository interface and Prisma implementation
+│   │   │   │   │                 (tick and close in one transaction), live name lookup
 │   │   │   │   ├── employees/    routes (HTTP), service (use cases), mapper
 │   │   │   │   ├── health/       /health (liveness) and /ready (readiness)
-│   │   │   │   ├── onboarding/   routes, service, the step pipeline (steps, runner, audit
-│   │   │   │   │                 observer), password generator
+│   │   │   │   ├── onboarding/   routes, service, the step pipeline (steps, template steps, runner,
+│   │   │   │   │                 audit observer), password generator
 │   │   │   │   └── templates/    routes, repository interface, Prisma repository
 │   │   │   ├── plugins/          cross-cutting Fastify plugins: auth (JWT + role guard), jwks
 │   │   │   │                     (OIDC discovery of signing keys), error handler
 │   │   │   ├── app.ts            builds the app from its dependencies (used by tests too)
 │   │   │   └── server.ts         composition root: picks the real implementations
 │   │   └── test/
-│   │       ├── helpers/          signed-token harness, fakes, app builder
+│   │       ├── helpers/          signed-token harness, fakes (including in-memory audit and checklists),
+│   │       │                     app builder
 │   │       ├── integration/      HTTP-level tests with app.inject(), and the migration tests
 │   │       └── unit/             services, mappers, repositories, config, key discovery
 │   └── desktop/                  Electron + React
@@ -171,20 +175,24 @@ system design are explained in full in [coding-standards.md](coding-standards.md
 - **Running the e2e test.** `pnpm test:e2e` (from the repo root or from `apps/desktop`) rebuilds the
   API and the desktop app every time before it starts, so it can never test a stale `out/` or
   `dist/`. Do not run `test/e2e/smoke.mjs` directly: that skips the build. It needs a display.
-  Without a database it skips the retry
-  scenario, because the audit log needs one. To run all of it, point `TEST_DATABASE_URL` at a
-  PostgreSQL server. The runner (`apps/desktop/test/e2e/run.mjs`) creates a throwaway database
-  `accessdesk_e2e_<hex>` through the `postgres` maintenance database, applies the migrations to it,
-  runs the test, and drops it. It never uses your development database, and the test refuses any
+  Without a database it skips the retry,
+  template and checklist, and manager scenarios, because the audit log and the checklists need one. To
+  run all of it, point `TEST_DATABASE_URL` at a PostgreSQL server. The runner
+  (`apps/desktop/test/e2e/run.mjs`) creates a throwaway database `accessdesk_e2e_<hex>` through the
+  `postgres` maintenance database, applies the migrations to it, seeds the templates, runs the test, and
+  drops it. It never uses your development database, and the test refuses any
   database not named that way:
 
   ```
   TEST_DATABASE_URL=postgresql://accessdesk:change-me@localhost:5432/postgres pnpm test:e2e
   ```
 
-- The one exception to "no database" is `apps/api/test/integration/database-migrations.test.ts`: the
-  migrations are SQL, so it runs them on a real PostgreSQL. It creates and drops its own scratch
-  database and is **skipped unless `TEST_DATABASE_URL` is set** (CI sets it). Locally, with the Docker
+- The exceptions to "no database" are `apps/api/test/integration/database-migrations.test.ts` (the
+  migrations are SQL, so it runs them on a real PostgreSQL) and
+  `apps/api/test/integration/checklists.prisma.test.ts` (the tick and close transactions, the rollback
+  when an audit row cannot be written, and the row lock need a real database). Each creates and drops its
+  own scratch database and is **skipped unless `TEST_DATABASE_URL` is set** (CI sets it). The Prisma
+  checklist repository also has mocked-client unit tests, so coverage does not depend on a database. Locally, with the Docker
   database from `pnpm db:up`:
 
   ```
@@ -220,4 +228,13 @@ Onboarding ([ADR 0010](adr/0010-onboarding-no-rollback-guarded-retry-one-time-pa
 worked example: `packages/shared/src/onboarding.ts` (schemas and role policy),
 `apps/api/src/modules/onboarding/` (routes, service, one object per step run by `runSteps`, an
 observer that audits each step) and `apps/desktop/src/renderer/src/pages/onboard-page.tsx`. A new step
-is a new object in the pipeline, not a change to the runner.
+is a new object in the pipeline, not a change to the runner. Part 2
+([ADR 0011](adr/0011-onboarding-part-2-templates-checklists-manager-start-date.md)) adds templates
+(`onboarding.template-steps.ts`), the shared role rule (`packages/shared/src/role-policy.ts`) and the
+checklists module, and is a good example of a change that touches every layer: a migration, shared
+schemas, a repository with a transaction, routes, the desktop client and IPC, screens and an end-to-end
+scenario.
+
+After pulling a change that adds a migration, apply it to your development database
+(`pnpm --filter @accessdesk/api db:deploy`, or `pnpm dev:all`). A screen that suddenly shows "Internal
+server error" is often just a database that is behind.

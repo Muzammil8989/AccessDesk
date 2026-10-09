@@ -37,6 +37,8 @@ const row = (overrides: Record<string, unknown> = {}) => ({
   status: 'OPEN',
   createdAt: AT,
   completedAt: null,
+  managerSubjectId: null,
+  startDate: null,
   template: { name: 'Developer' },
   items: [
     {
@@ -85,6 +87,8 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
         templateId: 't1',
         createdBy: 'admin-1',
         at: AT,
+        managerSubjectId: null,
+        startDate: null,
         tasks: [
           { title: 'A', description: null },
           { title: 'B', description: 'later' },
@@ -97,9 +101,10 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
           templateId: 't1',
           type: 'ONBOARDING',
           status: 'OPEN',
-          completedAt: null,
           createdBy: 'admin-1',
           createdAt: AT,
+          managerSubjectId: null,
+          startDate: null,
           items: {
             create: [
               { title: 'A', description: null, kind: 'MANUAL_TASK', position: 0 },
@@ -110,7 +115,7 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
       });
     });
 
-    it('saves a checklist with no tasks as already completed', async () => {
+    it('saves a checklist with no tasks as open, never completed, with its manager and start date', async () => {
       const { prisma, mocks } = fakePrisma();
 
       await new PrismaChecklistRepository(prisma).create({
@@ -118,18 +123,34 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
         templateId: null,
         createdBy: 'admin-1',
         at: AT,
+        managerSubjectId: 'm1',
+        startDate: '2026-10-20',
         tasks: [],
       });
 
-      expect(mocks.employeeChecklist.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ status: 'COMPLETED', completedAt: AT }),
+      const { data } = mocks.employeeChecklist.create.mock.calls[0]![0] as {
+        data: Record<string, unknown>;
+      };
+      expect(data).toMatchObject({
+        status: 'OPEN',
+        managerSubjectId: 'm1',
+        startDate: new Date('2026-10-20'),
       });
+      expect(data).not.toHaveProperty('completedAt');
     });
 
     it('treats a unique violation as "already there", and passes any other error on', async () => {
       const { prisma, mocks } = fakePrisma();
       const repo = new PrismaChecklistRepository(prisma);
-      const input = { subjectId: 's1', templateId: null, createdBy: 'a', at: AT, tasks: [] };
+      const input = {
+        subjectId: 's1',
+        templateId: null,
+        createdBy: 'a',
+        at: AT,
+        managerSubjectId: null,
+        startDate: null,
+        tasks: [],
+      };
 
       mocks.employeeChecklist.create.mockRejectedValueOnce(
         Object.assign(new Error('unique'), { code: 'P2002' }),
@@ -192,6 +213,8 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
             completedAt: null,
             totalCount: 2,
             doneCount: 1,
+            managerSubjectId: null,
+            startDate: null,
           },
         ]);
       },
@@ -215,6 +238,8 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
         createdAt: AT,
         completedAt: null,
         templateName: 'Developer',
+        managerSubjectId: null,
+        startDate: null,
         items: [
           {
             id: 'i1',
@@ -327,6 +352,91 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
       tx.appAuditLog.create.mockRejectedValue(new Error('audit insert refused'));
 
       await expect(new PrismaChecklistRepository(prisma).setItemDone(change)).rejects.toThrow(
+        'audit insert refused',
+      );
+    });
+  });
+
+  describe('setClosed', () => {
+    const closeChange = {
+      subjectId: 's1',
+      closed: true,
+      actorId: 'admin-1',
+      at: AT,
+      audit: {
+        actorId: 'admin-1',
+        action: 'checklist.close',
+        outcome: 'SUCCESS' as const,
+        targetSubjectId: 's1',
+        requestId: 'r1',
+      },
+    };
+
+    function armedForClose(tasks: number) {
+      const fake = fakePrisma();
+      fake.tx.employeeChecklist.findUnique.mockResolvedValue({ id: 'c1' });
+      fake.tx.checklistItem.count.mockResolvedValue(tasks);
+      fake.tx.employeeChecklist.findUniqueOrThrow.mockResolvedValue(
+        row({ status: 'COMPLETED', items: [], startDate: new Date('2026-10-20') }),
+      );
+      return fake;
+    }
+
+    it('locks the checklist, closes it and writes the audit row in one transaction', async () => {
+      const { prisma, mocks, tx } = armedForClose(0);
+
+      const result = await new PrismaChecklistRepository(prisma).setClosed(closeChange);
+
+      expect(mocks.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.employeeChecklist.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: { status: 'COMPLETED', completedAt: AT },
+      });
+      expect(tx.appAuditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ action: 'checklist.close', targetSubjectId: 's1' }),
+      });
+      expect(result).toMatchObject({
+        result: 'ok',
+        checklist: { status: 'done', startDate: '2026-10-20' },
+      });
+    });
+
+    it('reopens a checklist', async () => {
+      const { prisma, tx } = armedForClose(0);
+
+      await new PrismaChecklistRepository(prisma).setClosed({ ...closeChange, closed: false });
+
+      expect(tx.employeeChecklist.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: { status: 'OPEN', completedAt: null },
+      });
+    });
+
+    it('refuses a checklist that has tasks, writing nothing', async () => {
+      const { prisma, tx } = armedForClose(2);
+
+      expect(await new PrismaChecklistRepository(prisma).setClosed(closeChange)).toEqual({
+        result: 'has_tasks',
+      });
+      expect(tx.employeeChecklist.update).not.toHaveBeenCalled();
+      expect(tx.appAuditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('answers not_found when there is no checklist', async () => {
+      const { prisma, tx } = armedForClose(0);
+      tx.employeeChecklist.findUnique.mockResolvedValue(null);
+
+      expect(await new PrismaChecklistRepository(prisma).setClosed(closeChange)).toEqual({
+        result: 'not_found',
+      });
+    });
+
+    it('lets a failing audit write fail the whole call, so the transaction rolls back', async () => {
+      const { prisma, tx } = armedForClose(0);
+      tx.appAuditLog.create.mockRejectedValue(new Error('audit insert refused'));
+
+      await expect(new PrismaChecklistRepository(prisma).setClosed(closeChange)).rejects.toThrow(
         'audit insert refused',
       );
     });

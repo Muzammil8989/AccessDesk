@@ -1,9 +1,11 @@
 import type { ListChecklistsQuery } from '@accessdesk/shared';
-import type { PrismaClient } from '../../infra/db';
 import type { ChecklistItemStatus, ChecklistStatus, Prisma } from '../../generated/prisma/client';
+import type { PrismaClient } from '../../infra/db';
 import { toAuditData } from '../audit/prisma-audit.repository';
 import type {
   ChecklistRepository,
+  ClosedChange,
+  ClosedResult,
   ItemChange,
   NewChecklist,
   StoredChecklist,
@@ -14,6 +16,7 @@ import type {
 
 const ONBOARDING = 'ONBOARDING';
 const UNIQUE_VIOLATION = 'P2002';
+const DATE_LENGTH = 'YYYY-MM-DD'.length;
 
 const CHECKLIST_STATUS: Record<ChecklistStatus, StoredChecklistStatus> = {
   OPEN: 'open',
@@ -35,6 +38,9 @@ const WITH_ITEMS = {
 
 type Row = Prisma.EmployeeChecklistGetPayload<{ include: typeof WITH_ITEMS }>;
 
+const dateOnly = (date: Date | null): string | null =>
+  date ? date.toISOString().slice(0, DATE_LENGTH) : null;
+
 function toStored(row: Row): StoredChecklist {
   return {
     subjectId: row.subjectId,
@@ -42,6 +48,8 @@ function toStored(row: Row): StoredChecklist {
     createdAt: row.createdAt,
     completedAt: row.completedAt,
     templateName: row.template?.name ?? null,
+    managerSubjectId: row.managerSubjectId,
+    startDate: dateOnly(row.startDate),
     items: row.items.map((item) => ({
       id: item.id,
       title: item.title,
@@ -60,17 +68,17 @@ export class PrismaChecklistRepository implements ChecklistRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async create(checklist: NewChecklist): Promise<void> {
-    const empty = checklist.tasks.length === 0;
     try {
       await this.prisma.employeeChecklist.create({
         data: {
           subjectId: checklist.subjectId,
           templateId: checklist.templateId,
           type: ONBOARDING,
-          status: empty ? 'COMPLETED' : 'OPEN',
-          completedAt: empty ? checklist.at : null,
+          status: 'OPEN',
           createdBy: checklist.createdBy,
           createdAt: checklist.at,
+          managerSubjectId: checklist.managerSubjectId,
+          startDate: checklist.startDate ? new Date(checklist.startDate) : null,
           items: {
             create: checklist.tasks.map((task, position) => ({
               title: task.title,
@@ -119,6 +127,8 @@ export class PrismaChecklistRepository implements ChecklistRepository {
         completedAt: row.completedAt,
         totalCount: row.items.length,
         doneCount: row.items.filter((item) => item.status === 'DONE').length,
+        managerSubjectId: row.managerSubjectId,
+        startDate: dateOnly(row.startDate),
       })),
     };
   }
@@ -170,6 +180,35 @@ export class PrismaChecklistRepository implements ChecklistRepository {
         include: WITH_ITEMS,
       });
       return toStored(updated);
+    });
+  }
+
+  async setClosed(change: ClosedChange): Promise<ClosedResult> {
+    return this.prisma.$transaction(async (tx): Promise<ClosedResult> => {
+      const checklist = await tx.employeeChecklist.findUnique({
+        where: { subjectId_type: { subjectId: change.subjectId, type: ONBOARDING } },
+        select: { id: true },
+      });
+      if (!checklist) return { result: 'not_found' };
+
+      await tx.$queryRaw`SELECT id FROM employee_checklists WHERE id = ${checklist.id}::uuid FOR UPDATE`;
+
+      const tasks = await tx.checklistItem.count({ where: { checklistId: checklist.id } });
+      if (tasks > 0) return { result: 'has_tasks' };
+
+      await tx.employeeChecklist.update({
+        where: { id: checklist.id },
+        data: change.closed
+          ? { status: 'COMPLETED', completedAt: change.at }
+          : { status: 'OPEN', completedAt: null },
+      });
+      await tx.appAuditLog.create({ data: toAuditData(change.audit) });
+
+      const updated = await tx.employeeChecklist.findUniqueOrThrow({
+        where: { id: checklist.id },
+        include: WITH_ITEMS,
+      });
+      return { result: 'ok', checklist: toStored(updated) };
     });
   }
 }

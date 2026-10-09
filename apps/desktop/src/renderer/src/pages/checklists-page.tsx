@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/table';
 import { ApiRequestError } from '@/lib/api';
 import { CHECKLIST_PAGE_SIZE, checklistListQuery } from '@/lib/checklists-api';
-import { formatDate } from '@/lib/format';
+import { formatDay } from '@/lib/format';
 import { authQuery } from '@/lib/session';
 import { cn } from '@/lib/utils';
 
@@ -58,7 +58,7 @@ export function ChecklistsPage() {
       <PageHeader
         focusOnMount
         title="Onboarding checklists"
-        description="The manual tasks for each new employee, such as ordering a laptop."
+        description="The tasks, manager and start date for each new employee. Start dates are for information only: accounts are enabled when you onboard."
         actions={
           <Button asChild variant="outline">
             <Link to="/onboard">Back to Onboard</Link>
@@ -116,8 +116,9 @@ export function ChecklistsPage() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Employee</TableHead>
+                <TableHead>Manager</TableHead>
+                <TableHead>Start date</TableHead>
                 <TableHead>Progress</TableHead>
-                <TableHead>Started</TableHead>
                 <TableHead>
                   <span className="sr-only">Actions</span>
                 </TableHead>
@@ -131,10 +132,13 @@ export function ChecklistsPage() {
                       <Skeleton className="h-4 w-32" />
                     </TableCell>
                     <TableCell>
-                      <Skeleton className="h-4 w-20" />
+                      <Skeleton className="h-4 w-24" />
                     </TableCell>
                     <TableCell>
                       <Skeleton className="h-4 w-24" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-20" />
                     </TableCell>
                     <TableCell />
                   </TableRow>
@@ -148,7 +152,20 @@ export function ChecklistsPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    {item.status === 'done' ? (
+                    {item.manager ? (item.manager.person?.displayName ?? 'Unknown person') : '—'}
+                  </TableCell>
+                  <TableCell>{item.startDate ? formatDay(item.startDate) : '—'}</TableCell>
+                  <TableCell>
+                    {item.totalCount === 0 ? (
+                      item.status === 'done' ? (
+                        <Badge variant="success">
+                          <CircleCheck aria-hidden="true" />
+                          Marked as done
+                        </Badge>
+                      ) : (
+                        'No tasks'
+                      )
+                    ) : item.status === 'done' ? (
                       <Badge variant="success">
                         <CircleCheck aria-hidden="true" />
                         All tasks done
@@ -156,9 +173,6 @@ export function ChecklistsPage() {
                     ) : (
                       `${item.doneCount} of ${taskCount(item.totalCount)} done`
                     )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(item.createdAt)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button asChild variant="outline">
@@ -174,7 +188,7 @@ export function ChecklistsPage() {
               ))}
               {data && data.items.length === 0 && (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={4} className="p-0">
+                  <TableCell colSpan={5} className="p-0">
                     <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
                       <span
                         aria-hidden="true"
@@ -186,7 +200,8 @@ export function ChecklistsPage() {
                         {filter === 'open' ? 'No open checklists.' : 'No finished checklists yet.'}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        Choosing a template with manual tasks when you onboard someone creates one.
+                        Choosing a template with manual tasks, or giving a manager or a start date,
+                        when you onboard someone creates one.
                       </p>
                     </div>
                   </TableCell>

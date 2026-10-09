@@ -22,6 +22,8 @@ const api: AccessDeskApi = {
     checklists: {
       setItem: (subjectId, itemId, input) =>
         ipcRenderer.invoke(IPC.apiChecklistItemSet, { subjectId, itemId, input }),
+      setClosed: (subjectId, input) =>
+        ipcRenderer.invoke(IPC.apiChecklistClosedSet, { subjectId, input }),
     },
   },
 };

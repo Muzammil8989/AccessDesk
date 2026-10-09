@@ -57,11 +57,17 @@ describe.skipIf(!adminUrl)('PrismaChecklistRepository on a real database', () =>
     }
   }, 60_000);
 
-  const newChecklist = (subjectId: string, titles: string[]) => ({
+  const newChecklist = (
+    subjectId: string,
+    titles: string[],
+    extra: { managerSubjectId?: string; startDate?: string } = {},
+  ) => ({
     subjectId,
     templateId: null,
     createdBy: 'admin-1',
     at: AT,
+    managerSubjectId: extra.managerSubjectId ?? null,
+    startDate: extra.startDate ?? null,
     tasks: titles.map((title) => ({ title, description: null })),
   });
 
@@ -114,16 +120,42 @@ describe.skipIf(!adminUrl)('PrismaChecklistRepository on a real database', () =>
       expect(await repo.exists(subject())).toBe(false);
     });
 
-    it('creates a checklist with no tasks as already done', async () => {
+    it('creates a checklist with no tasks as open, never done, and keeps the manager and start date', async () => {
       const subjectId = subject();
+      const manager = subject();
 
-      await repo.create(newChecklist(subjectId, []));
+      await repo.create(
+        newChecklist(subjectId, [], { managerSubjectId: manager, startDate: '2026-10-20' }),
+      );
 
       expect(await repo.find(subjectId)).toMatchObject({
-        status: 'done',
-        completedAt: AT,
+        status: 'open',
+        completedAt: null,
+        managerSubjectId: manager,
+        startDate: '2026-10-20',
         items: [],
       });
+      const { rows } = await db.query(
+        `SELECT manager_subject_id, start_date::text AS start_date
+         FROM employee_checklists WHERE subject_id = $1`,
+        [subjectId],
+      );
+      expect(rows).toEqual([{ manager_subject_id: manager, start_date: '2026-10-20' }]);
+    });
+
+    it('has no manager or start date unless one was given', async () => {
+      const { checklist } = await seeded(['A']);
+
+      expect(checklist).toMatchObject({ managerSubjectId: null, startDate: null });
+    });
+
+    it('keeps the start date on the same calendar day whatever the server time zone', async () => {
+      const subjectId = subject();
+
+      await repo.create(newChecklist(subjectId, [], { startDate: '2026-12-31' }));
+      await repo.create(newChecklist(subject(), [], { startDate: '2027-01-01' }));
+
+      expect((await repo.find(subjectId))?.startDate).toBe('2026-12-31');
     });
 
     it('lists open and done checklists with their counts, newest first, and pages them', async () => {
@@ -147,7 +179,8 @@ describe.skipIf(!adminUrl)('PrismaChecklistRepository on a real database', () =>
       const find = (list: typeof open, id: string) => list.items.find((i) => i.subjectId === id);
       expect(find(open, a.subjectId)).toMatchObject({ totalCount: 2, doneCount: 1 });
       expect(find(open, b.subjectId)).toMatchObject({ totalCount: 1, doneCount: 0 });
-      expect(find(done, emptyId)).toMatchObject({ totalCount: 0, status: 'done' });
+      expect(find(open, emptyId)).toMatchObject({ totalCount: 0, status: 'open' });
+      expect(find(done, emptyId)).toBeUndefined();
       expect(find(done, a.subjectId)).toBeUndefined();
       expect(page.items).toHaveLength(1);
       expect(page.total).toBe(open.total);
@@ -282,6 +315,100 @@ describe.skipIf(!adminUrl)('PrismaChecklistRepository on a real database', () =>
       expect(unknown).toBeNull();
       expect((await repo.find(theirs.subjectId))?.items[0]?.status).toBe('pending');
       expect(await auditRows(mine.subjectId)).toEqual([]);
+    });
+  });
+
+  describe('setClosed', () => {
+    const close = (subjectId: string, closed: boolean) =>
+      repo.setClosed({
+        subjectId,
+        closed,
+        actorId: 'admin-7',
+        at: AT,
+        audit: {
+          actorId: 'admin-7',
+          action: closed ? 'checklist.close' : 'checklist.reopen',
+          outcome: 'SUCCESS',
+          targetSubjectId: subjectId,
+          requestId: 'req-1',
+        },
+      });
+    const emptyChecklist = async (extra = {}) => {
+      const subjectId = subject();
+      await repo.create(newChecklist(subjectId, [], extra));
+      return subjectId;
+    };
+
+    it('closes a checklist with no tasks, reopens it, and writes an audit row each time', async () => {
+      const subjectId = await emptyChecklist({ startDate: '2026-10-20' });
+
+      const closed = await close(subjectId, true);
+      const reopened = await close(subjectId, false);
+
+      expect(closed).toMatchObject({
+        result: 'ok',
+        checklist: { status: 'done', completedAt: AT },
+      });
+      expect(reopened).toMatchObject({
+        result: 'ok',
+        checklist: { status: 'open', completedAt: null, startDate: '2026-10-20' },
+      });
+      expect((await auditRows(subjectId)).map((row) => row.action)).toEqual([
+        'checklist.close',
+        'checklist.reopen',
+      ]);
+    });
+
+    it('moves the checklist between the Open and Done lists', async () => {
+      const subjectId = await emptyChecklist();
+      const listed = async (status: 'open' | 'done') =>
+        (await repo.list({ status, first: 0, max: 20 })).items.some(
+          (item) => item.subjectId === subjectId,
+        );
+      expect(await listed('open')).toBe(true);
+
+      await close(subjectId, true);
+      expect(await listed('open')).toBe(false);
+      expect(await listed('done')).toBe(true);
+
+      await close(subjectId, false);
+      expect(await listed('open')).toBe(true);
+    });
+
+    it('refuses a checklist that has tasks, changing and writing nothing', async () => {
+      const { subjectId } = await seeded(['A']);
+
+      expect(await close(subjectId, true)).toEqual({ result: 'has_tasks' });
+
+      expect(await repo.find(subjectId)).toMatchObject({ status: 'open' });
+      expect(await auditRows(subjectId)).toEqual([]);
+    });
+
+    it('answers not_found for a subject that has no checklist', async () => {
+      expect(await close(subject(), true)).toEqual({ result: 'not_found' });
+    });
+
+    it('rolls the close back when its audit row cannot be written', async () => {
+      const subjectId = await emptyChecklist();
+      await db.query(`
+        CREATE OR REPLACE FUNCTION test_refuse_close() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.action = 'checklist.close' THEN RAISE EXCEPTION 'audit insert refused'; END IF;
+          RETURN NEW;
+        END $$ LANGUAGE plpgsql`);
+      await db.query(
+        `CREATE TRIGGER test_refuse_close BEFORE INSERT ON app_audit_log
+         FOR EACH ROW EXECUTE FUNCTION test_refuse_close()`,
+      );
+
+      try {
+        await expect(close(subjectId, true)).rejects.toThrow();
+      } finally {
+        await db.query(`DROP TRIGGER test_refuse_close ON app_audit_log`);
+      }
+
+      expect(await repo.find(subjectId)).toMatchObject({ status: 'open', completedAt: null });
+      expect(await auditRows(subjectId)).toEqual([]);
     });
   });
 

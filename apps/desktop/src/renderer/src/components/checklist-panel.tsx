@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiRequestError } from '@/lib/api';
-import { checklistDetailQuery, setChecklistItem } from '@/lib/checklists-api';
+import { checklistDetailQuery, setChecklistClosed, setChecklistItem } from '@/lib/checklists-api';
 import { authQuery } from '@/lib/session';
 import { cn } from '@/lib/utils';
 
@@ -41,6 +41,7 @@ export function ChecklistPanel({ subjectId, headingLevel = 2 }: ChecklistPanelPr
     retry: false,
     onSuccess: (detail, change) => {
       queryClient.setQueryData(checklistDetailQuery(subjectId).queryKey, detail);
+      void queryClient.invalidateQueries({ queryKey: ['checklists'] });
       const title = detail.items.find((item) => item.id === change.itemId)?.title ?? 'The task';
       const { done, total } = progressOf(detail);
       setAnnouncement(
@@ -52,7 +53,20 @@ export function ChecklistPanel({ subjectId, headingLevel = 2 }: ChecklistPanelPr
     },
   });
 
-  const failure = checklist.error ?? toggle.error;
+  const close = useMutation({
+    mutationFn: setChecklistClosed,
+    retry: false,
+    onSuccess: (detail, change) => {
+      queryClient.setQueryData(checklistDetailQuery(subjectId).queryKey, detail);
+      void queryClient.invalidateQueries({ queryKey: ['checklists'] });
+      setAnnouncement(change.closed ? 'Checklist marked as done.' : 'Checklist reopened.');
+    },
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: checklistDetailQuery(subjectId).queryKey });
+    },
+  });
+
+  const failure = checklist.error ?? toggle.error ?? close.error;
   const status = failure instanceof ApiRequestError ? failure.status : null;
   useEffect(() => {
     if (status === 401) void queryClient.invalidateQueries({ queryKey: authQuery.queryKey });
@@ -95,20 +109,27 @@ export function ChecklistPanel({ subjectId, headingLevel = 2 }: ChecklistPanelPr
       {checklist.data && (
         <ChecklistTasks
           detail={checklist.data}
-          saving={toggle.isPending}
+          saving={toggle.isPending || close.isPending}
           onChange={(itemId, done) => {
             if (toggle.isPending) return;
             setAnnouncement('');
             toggle.mutate({ subjectId, itemId, done });
           }}
+          onClose={(closed) => {
+            if (close.isPending) return;
+            setAnnouncement('');
+            close.mutate({ subjectId, closed });
+          }}
         />
       )}
 
-      {toggle.isError && (
+      {(toggle.isError || close.isError) && (
         <Alert variant="destructive" role="alert">
           <AlertDescription className="mt-0 text-foreground">
             Could not confirm the change.{' '}
-            {toggle.error instanceof ApiRequestError ? `${toggle.error.message} ` : ''}
+            {(toggle.error ?? close.error) instanceof ApiRequestError
+              ? `${(toggle.error ?? close.error)?.message} `
+              : ''}
             The tasks above show what is saved. Try again if the task is not as you wanted it.
           </AlertDescription>
         </Alert>
@@ -125,15 +146,40 @@ function ChecklistTasks({
   detail,
   saving,
   onChange,
+  onClose,
 }: {
   detail: ChecklistDetail;
   saving: boolean;
   onChange: (itemId: string, done: boolean) => void;
+  onClose: (closed: boolean) => void;
 }) {
   const { done, total } = progressOf(detail);
 
   if (total === 0) {
-    return <p className="text-sm text-muted-foreground">This checklist has no tasks.</p>;
+    const closed = detail.status === 'done';
+    return (
+      <div className="flex flex-col gap-3" aria-busy={saving}>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>This checklist has no tasks.</span>
+          {closed && (
+            <Badge variant="success">
+              <CircleCheck aria-hidden="true" />
+              Marked as done
+            </Badge>
+          )}
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {closed
+            ? 'It is in the Done list. Reopen it to put it back in the Open list.'
+            : 'It stays in the Open list until you mark it as done.'}
+        </p>
+        <div>
+          <Button type="button" variant="outline" onClick={() => onClose(!closed)}>
+            {closed ? 'Reopen checklist' : 'Mark as done'}
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (

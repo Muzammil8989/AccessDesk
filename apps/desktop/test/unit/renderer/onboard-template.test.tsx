@@ -88,6 +88,8 @@ const checklist = (status: 'open' | 'done' = 'open') => ({
   completedAt: null,
   templateName: 'Developer',
   person: { displayName: 'Ann Lee', username: 'ann.lee' },
+  manager: null,
+  startDate: null,
   items: [
     {
       id: '00000000-0000-4000-8000-000000000011',

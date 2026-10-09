@@ -17,6 +17,8 @@ export type OnboardingStepName = (typeof ONBOARDING_STEP_NAMES)[number];
 export const ONBOARDING_ERROR_CODES = {
   usernameExists: 'username_exists',
   emailExists: 'email_exists',
+  unknownManager: 'unknown_manager',
+  managerDisabled: 'manager_disabled',
 } as const;
 
 export const NAME_MAX_LENGTH = 80;
@@ -45,6 +47,8 @@ export const onboardEmployeeSchema = z.object({
   departmentGroupId: z.string().min(1, 'Choose a department'),
   role: roleSchema,
   templateId: z.uuid().optional(),
+  managerSubjectId: z.uuid('Choose a manager from the list').optional(),
+  startDate: z.iso.date('Enter a valid date').optional(),
 });
 export type OnboardEmployeeInput = z.input<typeof onboardEmployeeSchema>;
 export type OnboardEmployee = z.infer<typeof onboardEmployeeSchema>;
@@ -53,6 +57,8 @@ export const retryOnboardingSchema = onboardEmployeeSchema.pick({
   departmentGroupId: true,
   role: true,
   templateId: true,
+  managerSubjectId: true,
+  startDate: true,
 });
 export type RetryOnboarding = z.infer<typeof retryOnboardingSchema>;
 

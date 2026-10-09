@@ -127,6 +127,8 @@ describe('GET /checklists', () => {
           totalCount: 1,
           doneCount: 0,
           person: { displayName: 'bob', username: 'bob' },
+          manager: null,
+          startDate: null,
         },
         {
           subjectId: ann,
@@ -136,6 +138,8 @@ describe('GET /checklists', () => {
           totalCount: 3,
           doneCount: 1,
           person: { displayName: 'Ann Lee', username: 'ann.lee' },
+          manager: null,
+          startDate: null,
         },
       ],
     });

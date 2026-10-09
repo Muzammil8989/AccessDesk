@@ -22,6 +22,17 @@ export const checklistPersonSchema = z.object({
 });
 export type ChecklistPerson = z.infer<typeof checklistPersonSchema>;
 
+export const setChecklistClosedSchema = z.object({ closed: z.boolean() });
+export type SetChecklistClosed = z.infer<typeof setChecklistClosedSchema>;
+
+export const CHECKLIST_ERROR_CODES = { hasTasks: 'checklist_has_tasks' } as const;
+
+export const checklistManagerSchema = z.object({
+  subjectId: z.string(),
+  person: checklistPersonSchema.nullable(),
+});
+export type ChecklistManager = z.infer<typeof checklistManagerSchema>;
+
 export const checklistStatusSchema = z.enum(['open', 'done', 'cancelled']);
 
 export const checklistSummarySchema = z.object({
@@ -32,6 +43,8 @@ export const checklistSummarySchema = z.object({
   totalCount: z.number().int().min(0),
   doneCount: z.number().int().min(0),
   person: checklistPersonSchema.nullable(),
+  manager: checklistManagerSchema.nullable(),
+  startDate: z.iso.date().nullable(),
 });
 export type ChecklistSummary = z.infer<typeof checklistSummarySchema>;
 
@@ -60,6 +73,8 @@ export const checklistDetailSchema = z.object({
   completedAt: z.iso.datetime().nullable(),
   templateName: z.string().nullable(),
   person: checklistPersonSchema.nullable(),
+  manager: checklistManagerSchema.nullable(),
+  startDate: z.iso.date().nullable(),
   items: z.array(checklistItemSchema),
 });
 export type ChecklistDetail = z.infer<typeof checklistDetailSchema>;

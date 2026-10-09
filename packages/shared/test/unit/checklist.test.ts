@@ -6,6 +6,7 @@ import {
   checklistListSchema,
   checklistParamsSchema,
   listChecklistsQuerySchema,
+  setChecklistClosedSchema,
   setChecklistItemSchema,
 } from '../../src/index';
 
@@ -58,7 +59,60 @@ describe('checklist params and body', () => {
   });
 });
 
+describe('setChecklistClosedSchema', () => {
+  it('needs a real boolean for closed', () => {
+    expect(setChecklistClosedSchema.parse({ closed: true })).toEqual({ closed: true });
+    for (const body of [{}, { closed: 'true' }, { closed: 1 }, { closed: null }]) {
+      expect(setChecklistClosedSchema.safeParse(body).success).toBe(false);
+    }
+  });
+});
+
 describe('response schemas', () => {
+  const when = '2026-10-09T12:00:00.000Z';
+  const summary = {
+    subjectId: ID,
+    status: 'open',
+    createdAt: when,
+    completedAt: null,
+    totalCount: 0,
+    doneCount: 0,
+    person: null,
+    manager: null,
+    startDate: null,
+  };
+
+  it('accepts a checklist with no tasks, no manager and no start date', () => {
+    expect(
+      checklistListSchema.safeParse({ total: 1, first: 0, max: 20, items: [summary] }).success,
+    ).toBe(true);
+  });
+
+  it.each(['2026-02-30', '20-10-2026', '2026-10-20T10:00:00Z', 'soon'])(
+    'rejects the start date %s in a response',
+    (startDate) => {
+      expect(
+        checklistListSchema.safeParse({
+          total: 1,
+          first: 0,
+          max: 20,
+          items: [{ ...summary, startDate }],
+        }).success,
+      ).toBe(false);
+    },
+  );
+
+  it('rejects a response that lacks the manager or the start date', () => {
+    const old: Partial<typeof summary> = { ...summary };
+    delete old.manager;
+    delete old.startDate;
+    expect(
+      checklistListSchema.safeParse({ total: 1, first: 0, max: 20, items: [old] }).success,
+    ).toBe(false);
+  });
+});
+
+describe('response schemas (shapes)', () => {
   const when = '2026-10-09T12:00:00.000Z';
 
   it('accepts a list whose person may be unknown', () => {
@@ -76,6 +130,8 @@ describe('response schemas', () => {
             totalCount: 3,
             doneCount: 1,
             person: null,
+            manager: { subjectId: ID, person: null },
+            startDate: '2026-10-20',
           },
         ],
       }).success,
@@ -90,6 +146,8 @@ describe('response schemas', () => {
       completedAt: when,
       templateName: 'Developer',
       person: { displayName: 'Ann Lee', username: 'ann.lee' },
+      manager: { subjectId: ID, person: { displayName: 'Bea Boss', username: 'boss' } },
+      startDate: '2026-10-20',
       items: [
         {
           id: ID,

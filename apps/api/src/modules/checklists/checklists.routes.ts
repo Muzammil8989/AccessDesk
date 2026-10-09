@@ -2,6 +2,7 @@ import {
   checklistItemParamsSchema,
   checklistParamsSchema,
   listChecklistsQuerySchema,
+  setChecklistClosedSchema,
   setChecklistItemSchema,
   type ChecklistDetail,
   type ChecklistList,
@@ -38,6 +39,16 @@ export function checklistRoutes(app: FastifyInstance, deps: ChecklistRouteDeps):
     scope.get('/checklists/:subjectId', async (request): Promise<ChecklistDetail> => {
       const { subjectId } = checklistParamsSchema.parse(request.params);
       return serviceFor(request).get(subjectId);
+    });
+
+    scope.patch('/checklists/:subjectId', async (request): Promise<ChecklistDetail> => {
+      const { subjectId } = checklistParamsSchema.parse(request.params);
+      const { closed } = setChecklistClosedSchema.parse(request.body);
+      const auth = requireAuth(request);
+      return serviceFor(request).setClosed(subjectId, closed, {
+        actorId: auth.sub,
+        requestId: request.id,
+      });
     });
 
     scope.patch(

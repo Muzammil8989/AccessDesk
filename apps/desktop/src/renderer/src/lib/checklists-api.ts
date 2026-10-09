@@ -39,6 +39,21 @@ export interface ChecklistItemChange {
   done: boolean;
 }
 
+export interface ChecklistClosedChange {
+  subjectId: string;
+  closed: boolean;
+}
+
+export async function setChecklistClosed({
+  subjectId,
+  closed,
+}: ChecklistClosedChange): Promise<ChecklistDetail> {
+  return parseResponse(
+    await window.accessdesk.api.checklists.setClosed(subjectId, { closed }),
+    checklistDetailSchema,
+  );
+}
+
 export async function setChecklistItem({
   subjectId,
   itemId,

@@ -30,8 +30,11 @@ AccessDesk itself, so applying templates is a way to raise someone's access.
 - **Failure and retry.** A failed template step gives `207`, and Retry skips what is done. There is no
   automatic rollback. The retry rule is unchanged: it needs a `SUCCESS` audit row for
   `onboarding.create_user` for that subject, by the same actor, in the last 24 hours. Retry repeats the
-  template (and later the manager and start date) and checks every safeguard again against the current
-  actor and the current state of the identity provider.
+  template, the manager and the start date, and checks every safeguard again against the current actor
+  and the current state of the identity provider. The one exception is the manager: it is checked again
+  only while the checklist does not exist yet. Once the checklist exists the manager is already saved,
+  and a manager whose account was disabled since then must not stop an admin from finishing the
+  other steps.
 - **Safeguards, enforced by the API when a template is applied.** One shared function decides them, so
   applying a template, the role chosen on the form (on create and on retry) and, later, saving a
   template cannot disagree. `owner` is never assigned. The super-admin role itself is never assigned
@@ -43,24 +46,34 @@ AccessDesk itself, so applying templates is a way to raise someone's access.
   creates it. This closes the route where an `hr-admin` applies the seeded HR template and creates
   another `hr-admin`. That template now needs a super-admin.
 - **Checklists.** The `create_checklist` step creates one onboarding checklist per subject when the
-  template has manual tasks, or a manager or a start date is given. The table keeps `subject_id` only: no names and no
-  emails. A unique constraint on `(subject_id, type)` makes the step safe to run again. Names are looked
-  up live from the identity provider and shown as "unknown" when the lookup fails.
-- **Checklist status.** A checklist is `open` while any task is pending and `done` when every task is
-  done. A checklist with no tasks (a manager or a start date only) must not hide that information in
-  the Done list; how it is listed is decided together with the manager and start date work. A tick
-  locks the checklist row inside its transaction, so two admins ticking different tasks at the
-  same moment cannot leave a finished checklist marked open.
+  template has manual tasks, or a manager is given, or a start date is given. It works without a
+  template. The table keeps `subject_id` only: no names and no emails. A unique constraint on
+  `(subject_id, type)` makes the step safe to run again. Names, including the manager's, are looked up
+  live from the identity provider (five at a time) and shown as "unknown" when the lookup fails.
+- **Checklist status.** A checklist is **never created as done**. It is `open` until it is closed.
+  With tasks it closes itself when the last task is ticked, and opens again if one is unticked. A
+  checklist with no tasks (a manager or a start date only) stays in the Open list, with "No tasks", its
+  manager and its start date, until someone closes it with
+  `PATCH /checklists/:subjectId` and `{ "closed": true }` ("Mark as done" on the screen). It can be
+  reopened the same way. This is refused with `409 checklist_has_tasks` for a checklist that has tasks,
+  because those close themselves. Closing and reopening write an audit row
+  (`checklist.close`, `checklist.reopen`) in the same transaction as the status change. A tick and a
+  close lock the checklist row inside their transaction, so two admins acting at the same moment cannot
+  leave a finished checklist marked open.
 - **Ticking a task.** `PATCH /checklists/:subjectId/items/:itemId` takes the wanted state and is
   idempotent. The item update and its audit row (`checklist.item_done` or `checklist.item_undone`) are
   written in one database transaction, so a tick never exists without its audit row.
 - **Manager.** Optional. The manager's `subjectId` is saved on the checklist. When onboarding is
-  submitted, the API checks the person in the identity provider and refuses an unknown or a disabled
-  account with `400`, before anything is created. The name is looked up live and never saved.
+  submitted, the API checks the person in the identity provider and refuses an unknown account with
+  `400 unknown_manager` and a disabled one with `400 manager_disabled`, before anything is created. Any
+  other failure of the identity provider is passed on as it is, not reported as an unknown manager. The
+  name is looked up live and never saved. The desktop picks the manager with the Employees search; a
+  person with a disabled account is listed but cannot be chosen.
 - **Start date.** Optional and saved on the checklist. For version 1 it is information only. The
   account is created and enabled immediately. Nothing is scheduled, because a later job has no logged-in
-  admin token (the open question in [0003](0003-forward-the-admins-own-token.md) stays open). The form
-  and the checklist say this in plain words.
+  admin token (the open question in [0003](0003-forward-the-admins-own-token.md) stays open). It is saved as a plain
+  calendar date (`YYYY-MM-DD`, a `DATE` column), so it never shifts with a time zone. The form, the
+  result screen, the lists and the checklist all say in plain words that it is information only.
 - **Existing template rows.** Two new migrations add the columns and the unique constraint, then move the
   department out of the items. The data migration is separate, so it can be run again, and it is
   narrow. It changes a template only when its `department_ref` is empty and it has exactly one
@@ -84,5 +97,7 @@ AccessDesk itself, so applying templates is a way to raise someone's access.
     true for the first supported provider.
   - A checklist is created after the template steps, so a partial result has no checklist until Retry
     finishes the work.
+  - If the manager's account is disabled between a failed attempt and its Retry, and the checklist was
+    not created yet, Retry is refused with `manager_disabled` until the manager is enabled again.
 - The start date can mislead if read as "the account unlocks that day". The screens say it does not.
 - A tick that cannot write its audit row is rolled back, and the admin sees an error and can try again.

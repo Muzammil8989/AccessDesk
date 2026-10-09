@@ -66,6 +66,7 @@ export interface FakeApiOptions {
   onboardingCreate?: (input: unknown) => Promise<ApiResponse>;
   onboardingRetry?: (subjectId: string, input: unknown) => Promise<ApiResponse>;
   checklistSetItem?: (subjectId: string, itemId: string, input: unknown) => Promise<ApiResponse>;
+  checklistSetClosed?: (subjectId: string, input: unknown) => Promise<ApiResponse>;
   login?: () => Promise<LoginResult>;
   saveSettings?: (input: unknown) => Promise<SettingsSaveResult>;
   testConnection?: (input: unknown) => Promise<ConnectionTestResult>;
@@ -109,6 +110,10 @@ export function installFakeApi(options: FakeApiOptions = {}) {
         ),
       },
       checklists: {
+        setClosed: vi.fn(
+          options.checklistSetClosed ??
+            (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),
+        ),
         setItem: vi.fn(
           options.checklistSetItem ??
             (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),

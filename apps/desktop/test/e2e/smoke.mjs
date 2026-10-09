@@ -376,10 +376,10 @@ try {
     env.bridge.join(),
   );
   check(
-    'the only write calls on the bridge are onboarding create and retry, and ticking a checklist task',
+    'the only write calls on the bridge are onboarding create and retry, ticking a checklist task and closing one',
     env.bridgeApi.sort().join() === 'checklists,get,onboarding' &&
       env.bridgeOnboarding.sort().join() === 'create,retry' &&
-      env.bridgeChecklists.join() === 'setItem',
+      env.bridgeChecklists.sort().join() === 'setClosed,setItem',
     `${env.bridgeApi.join()} / ${env.bridgeOnboarding.join()} / ${env.bridgeChecklists.join()}`,
   );
   const refusedRead = await win.evaluate(() => window.accessdesk.api.get('/audit-log'));
@@ -829,6 +829,152 @@ try {
         'the form is empty again after the checklist screens, with no password',
         (await win.getByLabel('First name').inputValue()) === '' &&
           !(await win.locator('body').innerText()).includes(templatePassword),
+      );
+
+      // ---- a manager and a start date, and no tasks: the checklist stays open until it is closed
+      const ann = users.find((u) => u.username === 'ann');
+      await win.getByLabel('First name').fill('Max');
+      await win.getByLabel('Last name').fill('Mgr');
+      await win.getByLabel('Email').fill('max.mgr@example.com');
+      await win.getByLabel('Username').fill('max.mgr');
+      await win.getByLabel('Department').selectOption({ label: 'Engineering' });
+
+      await win.getByLabel('Search for a manager').fill('user07');
+      const disabledChoice = win.getByRole('radio', { name: /User 07/ });
+      await disabledChoice.waitFor({ timeout: 10000 });
+      check(
+        'a person with a disabled account is listed but cannot be chosen as manager',
+        (await disabledChoice.isDisabled()) &&
+          (await win.getByText(/account disabled, cannot be chosen/).isVisible()),
+      );
+      await win.getByLabel('Search for a manager').fill('ann');
+      await win.getByRole('radio', { name: /Ann Lee/ }).click();
+      check(
+        'moving to a person does not pick them until the button is pressed',
+        await win.getByRole('button', { name: 'Use this person as manager' }).isEnabled(),
+      );
+      await win.getByRole('button', { name: 'Use this person as manager' }).click();
+      check(
+        'the chosen manager is shown with a Remove button',
+        await win.getByRole('button', { name: 'Remove Ann Lee as manager' }).isVisible(),
+      );
+      await win.getByLabel('Start date (optional)').fill('2026-10-20');
+      check(
+        'the form says the start date is information only',
+        await win
+          .getByText(
+            'Information only. The account is created and enabled now. It does not unlock on this date.',
+          )
+          .isVisible(),
+      );
+      await win.screenshot({ path: path.join(SHOTS, '10-manager.png') });
+      await win.getByRole('button', { name: 'Onboard employee' }).click();
+      await win.getByText('Employee onboarded').waitFor({ timeout: 15000 });
+
+      const max = onboarding.created.find((c) => c.body.username === 'max.mgr');
+      check(
+        'the account was created and enabled at once, whatever the start date',
+        max?.body.enabled === true,
+      );
+      check(
+        'the result shows the manager by name and the start date with its note',
+        (await win.getByText('Ann Lee', { exact: true }).first().isVisible()) &&
+          (await win.getByText('Oct 20, 2026').isVisible()) &&
+          (await win.getByText(/It does not unlock on this date/).isVisible()),
+      );
+      await win.getByText('This checklist has no tasks.').waitFor({ timeout: 10000 });
+      check(
+        'a checklist with no tasks offers "Mark as done" and says it stays open',
+        (await win.getByRole('button', { name: 'Mark as done' }).isVisible()) &&
+          (await win.getByText('It stays in the Open list until you mark it as done.').isVisible()),
+      );
+
+      const saved = await db.query(
+        `SELECT status, completed_at, manager_subject_id, start_date::text AS start_date,
+                (SELECT count(*)::int FROM checklist_items i WHERE i.checklist_id = c.id) AS tasks
+         FROM employee_checklists c WHERE c.subject_id = $1`,
+        [max.id],
+      );
+      check(
+        'the saved checklist is open, not done, with the manager id and the start date only',
+        saved.rows.length === 1 &&
+          saved.rows[0].status === 'OPEN' &&
+          saved.rows[0].completed_at === null &&
+          saved.rows[0].manager_subject_id === ann.id &&
+          saved.rows[0].start_date === '2026-10-20' &&
+          saved.rows[0].tasks === 0,
+        JSON.stringify(saved.rows),
+      );
+      const maxStored = JSON.stringify(
+        (
+          await db.query(
+            `SELECT row_to_json(c)::text AS c FROM employee_checklists c WHERE c.subject_id = $1
+             UNION ALL SELECT details::text FROM app_audit_log WHERE target_subject_id = $1`,
+            [max.id],
+          )
+        ).rows,
+      );
+      check(
+        'no saved row or audit row holds a name, an email, a username or the manager name',
+        !['Max', 'Mgr', 'max.mgr', 'Ann', 'Lee', 'ann@example.com'].some((secret) =>
+          maxStored.includes(secret),
+        ),
+      );
+
+      await win.getByRole('link', { name: 'Open checklists' }).click();
+      await win.getByRole('heading', { name: 'Onboarding checklists' }).waitFor({ timeout: 10000 });
+      const maxRow = win.getByRole('row', { name: /Max Mgr/ });
+      await maxRow.waitFor({ timeout: 10000 });
+      check(
+        'it shows in the Open list with "No tasks", the manager name and the start date',
+        (await maxRow.getByText('No tasks').isVisible()) &&
+          (await maxRow.getByText('Ann Lee').isVisible()) &&
+          (await maxRow.getByText('Oct 20, 2026').isVisible()),
+      );
+      await win.screenshot({ path: path.join(SHOTS, '11-open-empty.png') });
+
+      await maxRow.getByRole('link', { name: /Open the checklist for Max Mgr/ }).click();
+      await win.getByRole('heading', { name: 'Checklist for Max Mgr' }).waitFor({ timeout: 10000 });
+      check(
+        'the checklist screen shows the manager and the start date',
+        await win.getByText(/Manager Ann Lee · Start date Oct 20, 2026/).isVisible(),
+      );
+      await win.getByRole('button', { name: 'Mark as done' }).click();
+      await win.getByText('Marked as done', { exact: true }).waitFor({ timeout: 10000 });
+      const closed = await db.query(
+        `SELECT status, completed_at FROM employee_checklists WHERE subject_id = $1`,
+        [max.id],
+      );
+      const closeActions = (
+        await db.query(
+          `SELECT action FROM app_audit_log WHERE target_subject_id = $1 ORDER BY created_at, action`,
+          [max.id],
+        )
+      ).rows.map((row) => row.action);
+      check(
+        'closing it saves the status and writes an audit row',
+        closed.rows[0].status === 'COMPLETED' &&
+          closed.rows[0].completed_at !== null &&
+          closeActions.includes('checklist.close'),
+        closeActions.join(),
+      );
+
+      await win.getByRole('link', { name: /All checklists/ }).click();
+      await win.getByRole('heading', { name: 'Onboarding checklists' }).waitFor({ timeout: 10000 });
+      const leftOpen = await win
+        .getByRole('row', { name: /Max Mgr/ })
+        .waitFor({ state: 'detached', timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      check('it has left the Open list', leftOpen);
+      await win.getByRole('radio', { name: 'Done' }).click();
+      const doneRow = win.getByRole('row', { name: /Max Mgr/ });
+      await doneRow.waitFor({ timeout: 10000 });
+      check(
+        'and it is in the Done list as "Marked as done", still showing its manager and start date',
+        (await doneRow.getByText('Marked as done', { exact: true }).isVisible()) &&
+          (await doneRow.getByText('Ann Lee').isVisible()) &&
+          (await doneRow.getByText('Oct 20, 2026').isVisible()),
       );
     } finally {
       await db.end().catch(() => {});

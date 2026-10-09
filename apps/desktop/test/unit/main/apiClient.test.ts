@@ -411,6 +411,89 @@ describe('ticking a checklist task', () => {
   });
 });
 
+describe('closing a checklist', () => {
+  const detail = { subjectId: SUBJECT_ID, status: 'done', items: [] };
+
+  it('patches the fixed path built from the validated subject id, with only the wanted state', async () => {
+    const { client, fetchMock } = setup({ responses: [Response.json(detail)] });
+
+    const result = await client.setChecklistClosed(SUBJECT_ID, { closed: true, status: 'x' });
+
+    expect(result).toEqual({ ok: true, status: 200, data: detail });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe(`http://api.test/checklists/${SUBJECT_ID}`);
+    expect(init?.method).toBe('PATCH');
+    expect(JSON.parse(init?.body as string)).toEqual({ closed: true });
+  });
+
+  it.each([
+    ['a path-like subject id', '../employees', { closed: true }],
+    ['a subject id with a query', `${SUBJECT_ID}?x=1`, { closed: true }],
+    ['a non-string subject id', 7, { closed: true }],
+    ['no body', SUBJECT_ID, undefined],
+    ['closed as a string', SUBJECT_ID, { closed: 'yes' }],
+  ])('refuses %s without calling the API', async (_label, subjectId, input) => {
+    const { client, fetchMock } = setup({ responses: [] });
+
+    expect(await client.setChecklistClosed(subjectId, input)).toEqual({
+      ok: false,
+      status: 400,
+      message: 'Invalid request',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends the request again once, with a fresh token, after a 401', async () => {
+    const { client, fetchMock, auth } = setup({
+      fresh: 'tok-2',
+      responses: [Response.json({ message: 'expired' }, { status: 401 }), Response.json(detail)],
+    });
+
+    const result = await client.setChecklistClosed(SUBJECT_ID, { closed: true });
+
+    expect(result.ok).toBe(true);
+    expect(auth.forceRefresh).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not repeat the request after a network failure or timeout, and does not refresh', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('socket hang up'));
+    const forceRefresh = vi.fn().mockResolvedValue('tok-2');
+    const client = createApiClient({
+      getSettings: async () => settings,
+      auth: { getAccessToken: async () => 'tok-1', forceRefresh },
+      fetch: fetchMock,
+    });
+
+    const result = await client.setChecklistClosed(SUBJECT_ID, { closed: true });
+
+    expect(result).toMatchObject({ ok: false, status: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(forceRefresh).not.toHaveBeenCalled();
+  });
+
+  it('keeps the error code when the checklist has tasks', async () => {
+    const { client } = setup({
+      responses: [
+        Response.json(
+          {
+            error: 'checklist_has_tasks',
+            message: 'A checklist with tasks is done when every task is done',
+          },
+          { status: 409 },
+        ),
+      ],
+    });
+
+    expect(await client.setChecklistClosed(SUBJECT_ID, { closed: true })).toEqual({
+      ok: false,
+      status: 409,
+      message: 'A checklist with tasks is done when every task is done',
+      code: 'checklist_has_tasks',
+    });
+  });
+});
+
 describe('creating and retrying an onboarding with a template', () => {
   const TEMPLATE_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e01';
 
@@ -444,6 +527,49 @@ describe('creating and retrying an onboarding with a template', () => {
       templateId: TEMPLATE_ID,
     });
     expect(refused).toMatchObject({ ok: false, status: 400 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends the manager and the start date on create and on retry, and refuses a bad one', async () => {
+    const { client, fetchMock } = setup({
+      responses: [Response.json({}, { status: 201 }), Response.json({})],
+    });
+    const manager = '8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11';
+    const input = {
+      firstName: 'Ann',
+      lastName: 'Lee',
+      email: 'ann@example.com',
+      username: 'ann.lee',
+      departmentGroupId: 'g1',
+      role: 'member',
+    };
+
+    await client.createOnboarding({ ...input, managerSubjectId: manager, startDate: '2026-10-20' });
+    await client.retryOnboarding(SUBJECT_ID, {
+      departmentGroupId: 'g1',
+      role: 'member',
+      managerSubjectId: manager,
+      startDate: '2026-10-20',
+    });
+    const badDate = await client.createOnboarding({ ...input, startDate: '2026-02-30' });
+    const badManager = await client.retryOnboarding(SUBJECT_ID, {
+      departmentGroupId: 'g1',
+      role: 'member',
+      managerSubjectId: '../x',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toMatchObject({
+      managerSubjectId: manager,
+      startDate: '2026-10-20',
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({
+      departmentGroupId: 'g1',
+      role: 'member',
+      managerSubjectId: manager,
+      startDate: '2026-10-20',
+    });
+    expect(badDate).toMatchObject({ ok: false, status: 400 });
+    expect(badManager).toMatchObject({ ok: false, status: 400 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

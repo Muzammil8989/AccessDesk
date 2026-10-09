@@ -24,6 +24,8 @@ const summary = (n: number, overrides: Record<string, unknown> = {}) => ({
   totalCount: 3,
   doneCount: 1,
   person: { displayName: `Person ${n}`, username: `person${n}` },
+  manager: null,
+  startDate: null,
   ...overrides,
 });
 
@@ -34,7 +36,13 @@ describe('Open checklists screen', () => {
   it('lists each checklist with the person, the progress and the start date, and links to it', async () => {
     const api = installFakeApi({
       auth: adminAuth,
-      apiGet: async () => list([summary(1)]),
+      apiGet: async () =>
+        list([
+          summary(1, {
+            manager: { subjectId: id(50), person: { displayName: 'Bea Boss', username: 'boss' } },
+            startDate: '2026-10-20',
+          }),
+        ]),
     });
     renderRoutes(routes, '/onboard/checklists');
 
@@ -44,7 +52,8 @@ describe('Open checklists screen', () => {
     expect(within(table).getByText('Person 1')).toBeInTheDocument();
     expect(within(table).getByText('person1')).toBeInTheDocument();
     expect(within(table).getByText('1 of 3 tasks done')).toBeInTheDocument();
-    expect(within(table).getByText('Oct 5, 2026')).toBeInTheDocument();
+    expect(within(table).getByText('Bea Boss')).toBeInTheDocument();
+    expect(within(table).getByText('Oct 20, 2026')).toBeInTheDocument();
     expect(screen.getByText('Showing 1–1 of 1')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open the checklist for Person 1' })).toHaveAttribute(
       'href',
@@ -104,6 +113,55 @@ describe('Open checklists screen', () => {
       'The server sent a response this version of the app does not understand.',
     );
     expect(document.body).not.toHaveTextContent(/invalid_type|expected|zod/i);
+  });
+
+  it('keeps a checklist that has only a manager or a start date in the Open list, saying "No tasks"', async () => {
+    installFakeApi({
+      apiGet: async () =>
+        list([summary(1, { totalCount: 0, doneCount: 0, startDate: '2026-10-20' })]),
+    });
+    renderRoutes(routes, '/onboard/checklists');
+
+    const row = (await screen.findByText('Person 1')).closest('tr')!;
+
+    expect(within(row).getByText('No tasks')).toBeInTheDocument();
+    expect(within(row).getByText('Oct 20, 2026')).toBeInTheDocument();
+    expect(within(row).queryByText(/All tasks done/)).not.toBeInTheDocument();
+  });
+
+  it('shows a closed checklist without tasks as "Marked as done" in the Done list, with its start date', async () => {
+    installFakeApi({
+      apiGet: async (_path, query) =>
+        query?.status === 'done'
+          ? list([
+              summary(2, {
+                status: 'done',
+                totalCount: 0,
+                doneCount: 0,
+                startDate: '2026-10-20',
+                manager: { subjectId: id(50), person: null },
+              }),
+            ])
+          : list([]),
+    });
+    renderRoutes(routes, '/onboard/checklists');
+    await userEvent.click(await screen.findByRole('radio', { name: 'Done' }));
+
+    const row = (await screen.findByText('Person 2')).closest('tr')!;
+
+    expect(within(row).getByText('Marked as done').querySelector('svg')).not.toBeNull();
+    expect(within(row).getByText('Oct 20, 2026')).toBeInTheDocument();
+    expect(within(row).getByText('Unknown person')).toBeInTheDocument();
+  });
+
+  it('shows a dash when there is no manager or start date, and says start dates are information only', async () => {
+    installFakeApi({ apiGet: async () => list([summary(1)]) });
+    renderRoutes(routes, '/onboard/checklists');
+
+    const row = (await screen.findByText('Person 1')).closest('tr')!;
+
+    expect(within(row).getAllByText('—')).toHaveLength(2);
+    expect(screen.getByText(/Start dates are for information only/)).toBeInTheDocument();
   });
 
   it('has a link back to Onboard', async () => {
@@ -227,6 +285,8 @@ describe('Checklist screen for one person', () => {
     completedAt: null,
     templateName: 'Developer',
     person: { displayName: 'Ann Lee', username: 'ann.lee' },
+    manager: null,
+    startDate: null,
     items: [
       {
         id: id(11),
@@ -248,7 +308,7 @@ describe('Checklist screen for one person', () => {
 
     expect(heading).toHaveFocus();
     expect(
-      screen.getByText('Username ann.lee · Template Developer · Started Oct 9, 2026'),
+      screen.getByText('Username ann.lee · Template Developer · Onboarded Oct 9, 2026'),
     ).toBeInTheDocument();
     expect(await screen.findByRole('checkbox', { name: 'Order laptop' })).toBeInTheDocument();
   });
@@ -261,8 +321,48 @@ describe('Checklist screen for one person', () => {
       await screen.findByRole('heading', { level: 1, name: 'Checklist for an unknown person' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('Not found in the identity provider · Started Oct 9, 2026'),
+      screen.getByText('Not found in the identity provider · Onboarded Oct 9, 2026'),
     ).toBeInTheDocument();
+  });
+
+  it('shows the manager by name and the start date, with the information-only note', async () => {
+    installFakeApi({
+      apiGet: async () =>
+        ok(
+          detail({
+            manager: { subjectId: id(50), person: { displayName: 'Bea Boss', username: 'boss' } },
+            startDate: '2026-10-20',
+          }),
+        ),
+    });
+    renderRoutes(routes, `/onboard/checklists/${id(1)}`);
+
+    expect(
+      await screen.findByText(/Manager Bea Boss · Start date Oct 20, 2026/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Information only\. The account was created and enabled when they were onboarded/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows a manager who cannot be looked up as unknown', async () => {
+    installFakeApi({
+      apiGet: async () => ok(detail({ manager: { subjectId: id(50), person: null } })),
+    });
+    renderRoutes(routes, `/onboard/checklists/${id(1)}`);
+
+    expect(await screen.findByText(/Manager unknown/)).toBeInTheDocument();
+  });
+
+  it('shows no start date note when there is no start date', async () => {
+    installFakeApi({ apiGet: async () => ok(detail()) });
+    renderRoutes(routes, `/onboard/checklists/${id(1)}`);
+
+    await screen.findByRole('heading', { level: 1, name: 'Checklist for Ann Lee' });
+
+    expect(screen.queryByText(/Information only/)).not.toBeInTheDocument();
   });
 
   it('goes back to all checklists', async () => {

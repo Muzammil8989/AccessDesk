@@ -5,7 +5,7 @@ import { ChecklistPanel } from '@/components/checklist-panel';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { checklistDetailQuery } from '@/lib/checklists-api';
-import { formatDate } from '@/lib/format';
+import { START_DATE_NOTE_SAVED, formatDate, formatDay } from '@/lib/format';
 
 export function ChecklistDetailPage() {
   const { subjectId = '' } = useParams<{ subjectId: string }>();
@@ -19,7 +19,9 @@ export function ChecklistDetailPage() {
     ? [
         detail.person ? `Username ${detail.person.username}` : 'Not found in the identity provider',
         detail.templateName ? `Template ${detail.templateName}` : null,
-        `Started ${formatDate(detail.createdAt)}`,
+        detail.manager ? `Manager ${detail.manager.person?.displayName ?? 'unknown'}` : null,
+        detail.startDate ? `Start date ${formatDay(detail.startDate)}` : null,
+        `Onboarded ${formatDate(detail.createdAt)}`,
       ].filter(Boolean)
     : [];
 
@@ -37,6 +39,9 @@ export function ChecklistDetailPage() {
           </Button>
         }
       />
+      {detail?.startDate && (
+        <p className="text-sm text-muted-foreground">{START_DATE_NOTE_SAVED}</p>
+      )}
       <ChecklistPanel subjectId={subjectId} />
     </div>
   );

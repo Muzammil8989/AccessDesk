@@ -69,6 +69,7 @@ export class OnboardingService {
     const { identity } = this.deps;
     this.assertRoleAllowed(caller, input.role);
     const template = await this.loadTemplate(input.templateId, caller);
+    await this.verifyManager(input.managerSubjectId);
 
     const [groups, sameUsername, sameEmail] = await Promise.all([
       identity.listGroups(),
@@ -89,7 +90,7 @@ export class OnboardingService {
         ...(template
           ? templateSteps({ identity, template, groups, department, role: input.role })
           : []),
-        ...this.checklistSteps(template, caller, false),
+        ...this.checklistSteps(template, input, caller, false),
       ],
       context,
       this.observerFor(caller),
@@ -111,7 +112,7 @@ export class OnboardingService {
     this.assertRoleAllowed(caller, input.role);
     const template = await this.loadTemplate(input.templateId, caller);
 
-    const [groups, createdByCaller] = await Promise.all([
+    const [groups, createdByCaller, checklistExists] = await Promise.all([
       identity.listGroups(),
       audit.hasSuccessSince({
         action: ONBOARDING_AUDIT_ACTIONS.create_user,
@@ -119,8 +120,10 @@ export class OnboardingService {
         targetSubjectId: subjectId,
         since: new Date(clock().getTime() - RETRY_WINDOW_MS),
       }),
+      this.deps.checklists.exists(subjectId),
     ]);
     if (!createdByCaller) throw onboardingErrors.retryNotAllowed();
+    if (!checklistExists) await this.verifyManager(input.managerSubjectId);
     const department = this.findDepartment(groups, input.departmentGroupId);
 
     const [memberships, roles] = await Promise.all([
@@ -150,7 +153,7 @@ export class OnboardingService {
             assignedRoles: roles,
           })
         : []),
-      ...this.checklistSteps(template, caller, await this.deps.checklists.exists(subjectId)),
+      ...this.checklistSteps(template, input, caller, checklistExists),
     ];
     const outcome = await runSteps(steps, { subjectId }, this.observerFor(caller));
 
@@ -163,23 +166,40 @@ export class OnboardingService {
 
   private checklistSteps(
     template: Template | null,
+    input: Pick<OnboardEmployee, 'managerSubjectId' | 'startDate'>,
     caller: Pick<Caller, 'actorId'>,
     satisfied: boolean,
   ): OnboardingStep[] {
     const tasks = (template?.items ?? [])
       .filter((item) => item.kind === 'MANUAL_TASK')
       .map(({ title, description }) => ({ title, description }));
-    if (!template || tasks.length === 0) return [];
+    const managerSubjectId = input.managerSubjectId ?? null;
+    const startDate = input.startDate ?? null;
+    if (tasks.length === 0 && !managerSubjectId && !startDate) return [];
     return [
       createChecklistStep({
         checklists: this.deps.checklists,
-        templateId: template.id,
+        templateId: template?.id ?? null,
         tasks,
+        managerSubjectId,
+        startDate,
         actorId: caller.actorId,
         now: this.deps.clock,
         satisfied,
       }),
     ];
+  }
+
+  /** The manager must exist and be enabled. Checked before anything is created. */
+  private async verifyManager(managerSubjectId: string | undefined): Promise<void> {
+    if (managerSubjectId === undefined) return;
+    const manager = await this.deps.identity.getUser(managerSubjectId).catch((error: unknown) => {
+      if (error instanceof IdentityProviderError && error.status === 404) {
+        throw onboardingErrors.unknownManager();
+      }
+      throw error;
+    });
+    if (!manager.enabled) throw onboardingErrors.managerDisabled();
   }
 
   private assertRoleAllowed(caller: Pick<Caller, 'roles'>, role: string): void {

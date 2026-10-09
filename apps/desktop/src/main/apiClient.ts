@@ -1,6 +1,7 @@
 import {
   onboardEmployeeSchema,
   retryOnboardingSchema,
+  setChecklistClosedSchema,
   setChecklistItemSchema,
   type AppSettings,
 } from '@accessdesk/shared';
@@ -126,6 +127,18 @@ export function createApiClient(deps: ApiClientDeps) {
       return request({
         method: 'POST',
         path: `/onboarding/${id.data}/retry`,
+        body: parsed.data,
+        timeoutMs: WRITE_TIMEOUT_MS,
+      });
+    },
+
+    async setChecklistClosed(subjectId: unknown, input: unknown): Promise<ApiResponse> {
+      const subject = uuidSchema.safeParse(subjectId);
+      const parsed = setChecklistClosedSchema.safeParse(input);
+      if (!subject.success || !parsed.success) return INVALID_REQUEST;
+      return request({
+        method: 'PATCH',
+        path: `/checklists/${subject.data}`,
         body: parsed.data,
         timeoutMs: WRITE_TIMEOUT_MS,
       });

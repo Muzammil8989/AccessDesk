@@ -1,5 +1,11 @@
 import type { IdentityProvider } from '@accessdesk/identity';
-import type { ChecklistDetail, ChecklistList, ListChecklistsQuery } from '@accessdesk/shared';
+import type {
+  ChecklistDetail,
+  ChecklistList,
+  ChecklistManager,
+  ChecklistPerson,
+  ListChecklistsQuery,
+} from '@accessdesk/shared';
 import type { AuditEntry } from '../audit/audit.repository';
 import { checklistErrors } from './checklists.errors';
 import type { ChecklistRepository, StoredChecklist } from './checklists.repository';
@@ -19,7 +25,17 @@ export interface ChecklistCaller {
 export const CHECKLIST_AUDIT_ACTIONS = {
   done: 'checklist.item_done',
   undone: 'checklist.item_undone',
+  close: 'checklist.close',
+  reopen: 'checklist.reopen',
 } as const;
+
+type People = Map<string, ChecklistPerson | null>;
+
+function managerOf(managerSubjectId: string | null, people: People): ChecklistManager | null {
+  return managerSubjectId
+    ? { subjectId: managerSubjectId, person: people.get(managerSubjectId) ?? null }
+    : null;
+}
 
 export class ChecklistsService {
   constructor(private readonly deps: ChecklistsServiceDeps) {}
@@ -28,7 +44,10 @@ export class ChecklistsService {
     const { items, total } = await this.deps.checklists.list(query);
     const people = await lookupPeople(
       this.deps.identity,
-      items.map((item) => item.subjectId),
+      items.flatMap((item) => [
+        item.subjectId,
+        ...(item.managerSubjectId ? [item.managerSubjectId] : []),
+      ]),
     );
     return {
       total,
@@ -42,6 +61,8 @@ export class ChecklistsService {
         totalCount: item.totalCount,
         doneCount: item.doneCount,
         person: people.get(item.subjectId) ?? null,
+        manager: managerOf(item.managerSubjectId, people),
+        startDate: item.startDate,
       })),
     };
   }
@@ -81,8 +102,35 @@ export class ChecklistsService {
     return this.detail(updated);
   }
 
+  async setClosed(
+    subjectId: string,
+    closed: boolean,
+    caller: ChecklistCaller,
+  ): Promise<ChecklistDetail> {
+    const audit: AuditEntry = {
+      actorId: caller.actorId,
+      action: closed ? CHECKLIST_AUDIT_ACTIONS.close : CHECKLIST_AUDIT_ACTIONS.reopen,
+      outcome: 'SUCCESS',
+      targetSubjectId: subjectId,
+      requestId: caller.requestId,
+    };
+    const outcome = await this.deps.checklists.setClosed({
+      subjectId,
+      closed,
+      actorId: caller.actorId,
+      at: this.deps.clock(),
+      audit,
+    });
+    if (outcome.result === 'not_found') throw checklistErrors.notFound();
+    if (outcome.result === 'has_tasks') throw checklistErrors.hasTasks();
+    return this.detail(outcome.checklist);
+  }
+
   private async detail(checklist: StoredChecklist): Promise<ChecklistDetail> {
-    const people = await lookupPeople(this.deps.identity, [checklist.subjectId]);
+    const people = await lookupPeople(this.deps.identity, [
+      checklist.subjectId,
+      ...(checklist.managerSubjectId ? [checklist.managerSubjectId] : []),
+    ]);
     return {
       subjectId: checklist.subjectId,
       status: checklist.status,
@@ -90,6 +138,8 @@ export class ChecklistsService {
       completedAt: checklist.completedAt?.toISOString() ?? null,
       templateName: checklist.templateName,
       person: people.get(checklist.subjectId) ?? null,
+      manager: managerOf(checklist.managerSubjectId, people),
+      startDate: checklist.startDate,
       items: checklist.items.map((item) => ({
         id: item.id,
         title: item.title,
