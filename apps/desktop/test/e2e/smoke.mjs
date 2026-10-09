@@ -58,7 +58,7 @@ const groups = [
   { id: 'g-sales', name: 'Sales', path: '/Sales' },
 ];
 const roles = new Map(
-  ['member', 'manager', 'admin'].map((name) => [name, { id: randomUUID(), name }]),
+  ['member', 'manager', 'admin', 'developer'].map((name) => [name, { id: randomUUID(), name }]),
 );
 const memberships = new Map();
 const roleMappings = new Map();
@@ -187,6 +187,9 @@ const idp = createServer(async (req, res) => {
     if (collection === 'groups' && !id && req.method === 'GET') {
       return sendJson(res, 200, groups.slice(first, first + max));
     }
+    if (collection === 'roles' && !id && req.method === 'GET') {
+      return sendJson(res, 200, [...roles.values()].slice(first, first + max));
+    }
     if (collection === 'roles' && id && !sub && req.method === 'GET') {
       return roles.has(id)
         ? sendJson(res, 200, roles.get(id))
@@ -245,6 +248,7 @@ const idp = createServer(async (req, res) => {
 
     const user = users.find((u) => u.id === id);
     if (!user) return sendJson(res, 404, { errorMessage: 'User not found' });
+    if (!sub && req.method === 'GET') return sendJson(res, 200, user);
     if (sub === 'groups') {
       const joined = memberships.get(id) ?? new Set();
       if (!subId && req.method === 'GET') {
@@ -332,6 +336,7 @@ const launch = () =>
 const consoleLogs = [];
 let app;
 let onboardedPassword = '';
+let templatePassword = '';
 
 try {
   app = await launch();
@@ -350,6 +355,7 @@ try {
     bridge: Object.keys(window.accessdesk),
     bridgeApi: Object.keys(window.accessdesk.api),
     bridgeOnboarding: Object.keys(window.accessdesk.api.onboarding),
+    bridgeChecklists: Object.keys(window.accessdesk.api.checklists),
     evalResult: (() => {
       try {
         eval('1+1');
@@ -370,10 +376,17 @@ try {
     env.bridge.join(),
   );
   check(
-    'the only write calls on the bridge are the two onboarding ones',
-    env.bridgeApi.sort().join() === 'get,onboarding' &&
-      env.bridgeOnboarding.sort().join() === 'create,retry',
-    `${env.bridgeApi.join()} / ${env.bridgeOnboarding.join()}`,
+    'the only write calls on the bridge are onboarding create and retry, and ticking a checklist task',
+    env.bridgeApi.sort().join() === 'checklists,get,onboarding' &&
+      env.bridgeOnboarding.sort().join() === 'create,retry' &&
+      env.bridgeChecklists.join() === 'setItem',
+    `${env.bridgeApi.join()} / ${env.bridgeOnboarding.join()} / ${env.bridgeChecklists.join()}`,
+  );
+  const refusedRead = await win.evaluate(() => window.accessdesk.api.get('/audit-log'));
+  check(
+    'a read path that is not on the allowlist is refused, without calling the API',
+    refusedRead.ok === false && refusedRead.status === 400,
+    JSON.stringify(refusedRead),
   );
   const cspHeader = await app.evaluate(async ({ net }) =>
     (await net.fetch('app://accessdesk/index.html')).headers.get('content-security-policy'),
@@ -656,8 +669,170 @@ try {
     await win.getByLabel('First name').waitFor({ timeout: 5000 });
   } else {
     console.log(
-      'SKIP  retry scenario: no scratch database (run "pnpm test:e2e" with TEST_DATABASE_URL set)',
+      'SKIP  retry and template scenarios: no scratch database (run "pnpm test:e2e" with TEST_DATABASE_URL set)',
     );
+  }
+
+  if (HAS_DATABASE) {
+    const pg = apiReq('pg');
+    const db = new pg.Client({ connectionString: E2E_DATABASE_URL });
+    await db.connect();
+    try {
+      const templateSelect = win.getByLabel('Template (optional)');
+      await templateSelect.waitFor({ timeout: 10000 });
+      const templateOptions = await templateSelect.locator('option').allInnerTexts();
+      check(
+        'the form offers the seeded templates',
+        templateOptions.join() === 'No template,Developer,HR,Sales',
+        templateOptions.join(),
+      );
+      check(
+        'a template with an admin-level role is disabled for an hr-admin, with the reason',
+        (await templateSelect.locator('option', { hasText: 'HR' }).isDisabled()) &&
+          (await win.getByText(/Not available to you: HR/).isVisible()),
+      );
+
+      await win.getByLabel('First name').fill('Tina');
+      await win.getByLabel('Last name').fill('Templ');
+      await win.getByLabel('Email').fill('tina.templ@example.com');
+      await win.getByLabel('Username').fill('tina.templ');
+      await templateSelect.selectOption({ label: 'Developer' });
+      check(
+        'choosing a template fills in the department and the role',
+        (await win.getByLabel('Department').inputValue()) === 'g-eng' &&
+          (await win.getByLabel('Role').inputValue()) === 'member' &&
+          (await win.getByText(/Department set to Engineering/).isVisible()),
+      );
+      check(
+        'the form lists what the template will also do',
+        (await win.getByText('Assign the role developer').isVisible()) &&
+          (await win.getByText('Add the task "Order laptop" to their checklist').isVisible()),
+      );
+      await win.screenshot({ path: path.join(SHOTS, '8-template.png') });
+      await win.getByRole('button', { name: 'Onboard employee' }).click();
+      await win.getByText('Employee onboarded').waitFor({ timeout: 15000 });
+      templatePassword = (await win.getByLabel('Temporary password').innerText()).trim();
+
+      const tina = onboarding.created.find((c) => c.body.username === 'tina.templ');
+      check(
+        'the user got the form role and the template role, and the department group once',
+        tina !== undefined &&
+          onboarding.roleMappingPosts
+            .filter((r) => r.userId === tina.id)
+            .map((r) => r.names.join())
+            .join('|') === 'member|developer' &&
+          onboarding.groupPuts.filter((g) => g.userId === tina.id).length === 1,
+      );
+      check(
+        'the result lists the template role step and the checklist step as done',
+        (await win.getByText('Assign the template role').isVisible()) &&
+          (await win.getByText('Create the checklist').isVisible()),
+      );
+
+      const laptop = win.getByRole('checkbox', { name: 'Order laptop' });
+      await laptop.waitFor({ timeout: 10000 });
+      check(
+        'the checklist is shown on the result screen with the template tasks, none ticked',
+        (await win.getByRole('checkbox').count()) === 2 &&
+          !(await laptop.isChecked()) &&
+          (await win.getByText('0 of 2 tasks done', { exact: true }).isVisible()),
+      );
+      await laptop.click();
+      await win.getByText('1 of 2 tasks done', { exact: true }).waitFor({ timeout: 10000 });
+      check('ticking a task saves it and updates the progress', await laptop.isChecked());
+      await win.screenshot({ path: path.join(SHOTS, '8b-checklist.png') });
+
+      const auditFor = async () =>
+        (
+          await db.query(
+            `SELECT action, outcome, actor_id, details::text AS details FROM app_audit_log
+             WHERE target_subject_id = $1 ORDER BY created_at, action`,
+            [tina.id],
+          )
+        ).rows;
+      const actions = (await auditFor()).map((row) => row.action);
+      check(
+        'every step and the tick wrote an audit row',
+        [
+          'onboarding.create_user',
+          'onboarding.add_to_group',
+          'onboarding.assign_role',
+          'onboarding.template_assign_role',
+          'onboarding.create_checklist',
+          'checklist.item_done',
+        ].every((action) => actions.includes(action)),
+        actions.join(),
+      );
+      const auditText = JSON.stringify(await auditFor());
+      check(
+        'no audit row holds the password, a name, the email or the username',
+        ![templatePassword, 'Tina', 'Templ', 'tina.templ'].some((secret) =>
+          auditText.includes(secret),
+        ),
+      );
+      const stored = await db.query(
+        `SELECT row_to_json(c)::text AS checklist,
+                (SELECT string_agg(row_to_json(i)::text, ' ') FROM checklist_items i
+                 WHERE i.checklist_id = c.id) AS items
+         FROM employee_checklists c WHERE c.subject_id = $1`,
+        [tina.id],
+      );
+      const storedText = JSON.stringify(stored.rows);
+      check(
+        'the saved checklist is tied to the subject id only: no name, email or username',
+        stored.rows.length === 1 &&
+          ![templatePassword, 'Tina', 'Templ', 'tina.templ'].some((secret) =>
+            storedText.includes(secret),
+          ),
+      );
+
+      await win.getByRole('link', { name: 'Open checklists' }).click();
+      await win.getByRole('heading', { name: 'Onboarding checklists' }).waitFor({ timeout: 10000 });
+      const row = win.getByRole('row', { name: /Tina Templ/ });
+      await row.waitFor({ timeout: 10000 });
+      check(
+        'the open checklists list shows the live name and the progress',
+        (await row.getByText('1 of 2 tasks done', { exact: true }).isVisible()) &&
+          (await row.getByText('tina.templ').isVisible()),
+      );
+      check(
+        'leaving the page cleared the temporary password',
+        !(await win.locator('body').innerText()).includes(templatePassword),
+      );
+      check(
+        'the page heading has keyboard focus when the screen opens',
+        await win
+          .getByRole('heading', { name: 'Onboarding checklists' })
+          .evaluate((element) => element === document.activeElement),
+      );
+      await win.screenshot({ path: path.join(SHOTS, '9-checklists.png') });
+
+      await row.getByRole('link', { name: /Open the checklist for Tina Templ/ }).click();
+      await win
+        .getByRole('heading', { name: 'Checklist for Tina Templ' })
+        .waitFor({ timeout: 10000 });
+      const again = win.getByRole('checkbox', { name: 'Order laptop' });
+      await again.waitFor({ timeout: 10000 });
+      check('the checklist screen shows the saved tick', await again.isChecked());
+      await again.click();
+      await win.getByText('0 of 2 tasks done', { exact: true }).waitFor({ timeout: 10000 });
+      const afterUntick = (await auditFor()).map((entry) => entry.action);
+      check(
+        'unticking a task writes its own audit row',
+        afterUntick.includes('checklist.item_undone'),
+        afterUntick.join(),
+      );
+
+      await win.getByRole('link', { name: 'Onboard', exact: true }).click();
+      await win.getByLabel('First name').waitFor({ timeout: 10000 });
+      check(
+        'the form is empty again after the checklist screens, with no password',
+        (await win.getByLabel('First name').inputValue()) === '' &&
+          !(await win.locator('body').innerText()).includes(templatePassword),
+      );
+    } finally {
+      await db.end().catch(() => {});
+    }
   }
 
   await win.getByRole('button', { name: 'Sign out' }).click();
@@ -731,6 +906,12 @@ check(
   'API logs never contain the temporary password',
   onboardedPassword !== '' && !apiText.includes(onboardedPassword),
 );
+if (HAS_DATABASE) {
+  check(
+    'API logs never contain the temporary password of the template onboarding',
+    templatePassword !== '' && !apiText.includes(templatePassword),
+  );
+}
 const ownProbe = /Executing inline script violates/;
 const unexpectedLogs = consoleLogs.filter((l) => !ownProbe.test(l));
 const csp = unexpectedLogs.filter((l) => /content security policy|refused to/i.test(l));
