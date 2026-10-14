@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
 // jsdom has no ResizeObserver; Electron does. Radix measures the tooltip arrow with it. Defined
@@ -15,6 +15,10 @@ if (!('ResizeObserver' in globalThis)) {
     },
   });
 }
+
+// The first test in a file that renders the real router also pays for loading its lazy screen. On a
+// slow CI runner that alone can exceed the 1 s default, so a test failed for being slow, not wrong.
+configure({ asyncUtilTimeout: 5000 });
 
 afterEach(() => {
   cleanup();
