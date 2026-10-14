@@ -1,4 +1,8 @@
-import { employeeFilterOptionsSchema, employeeListSchema } from '@accessdesk/shared';
+import {
+  employeeDetailSchema,
+  employeeFilterOptionsSchema,
+  employeeListSchema,
+} from '@accessdesk/shared';
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { apiGet, retryable } from './api';
 
@@ -36,6 +40,13 @@ export const employeesQuery = (
         max: EMPLOYEE_PAGE_SIZE,
       }),
     placeholderData: keepPreviousData,
+    retry: retryable,
+  });
+
+export const employeeDetailQuery = (id: string) =>
+  queryOptions({
+    queryKey: ['employee', id],
+    queryFn: () => apiGet(`/employees/${id}`, employeeDetailSchema),
     retry: retryable,
   });
 

@@ -18,6 +18,9 @@ const ChecklistDetailPage = lazy(() =>
 const ChecklistsPage = lazy(() =>
   import('@/pages/checklists-page').then((m) => ({ default: m.ChecklistsPage })),
 );
+const EmployeeDetailPage = lazy(() =>
+  import('@/pages/employee-detail-page').then((m) => ({ default: m.EmployeeDetailPage })),
+);
 const EmployeesPage = lazy(() =>
   import('@/pages/employees-page').then((m) => ({ default: m.EmployeesPage })),
 );
@@ -44,6 +47,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Navigate to="/employees" replace /> },
       { path: 'employees', element: guarded('employees', <EmployeesPage />) },
+      { path: 'employees/:id', element: guarded('employees', <EmployeeDetailPage />) },
       { path: 'onboard', element: guarded('onboard', <OnboardPage />) },
       { path: 'onboard/checklists', element: guarded('onboard', <ChecklistsPage />) },
       {

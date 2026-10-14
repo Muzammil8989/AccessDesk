@@ -607,6 +607,27 @@ try {
   await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 10000 });
   check('clearing the filters brings everyone back', true);
 
+  // Employee detail, read only. Ann is in Engineering and holds the developer role.
+  await win.getByLabel('Search employees').fill('ann');
+  await win.getByText('Showing 1–1 of 1').waitFor({ timeout: 10000 });
+  await win.getByRole('link', { name: /Ann Lee/ }).click();
+  await win.getByRole('heading', { level: 1, name: 'Ann Lee' }).waitFor({ timeout: 10000 });
+  await win.getByRole('list', { name: 'Groups' }).getByText('/Engineering').waitFor();
+  await win.getByRole('list', { name: 'Roles' }).getByText('developer').waitFor();
+  check(
+    'employee detail shows the groups and roles held directly, and hides the identity provider roles',
+    (await win.getByRole('list', { name: 'Roles' }).getByRole('listitem').count()) === 1,
+  );
+  await win.screenshot({ path: path.join(SHOTS, '3d-employee-detail.png') });
+  await win.getByRole('link', { name: /All employees/ }).click();
+  await win.getByText('Showing 1–1 of 1').waitFor({ timeout: 10000 });
+  check(
+    'back from the detail restores the search',
+    (await win.getByLabel('Search employees').inputValue()) === 'ann',
+  );
+  await win.getByLabel('Search employees').fill('');
+  await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 10000 });
+
   for (const name of ['Offboard', 'Access Review', 'Audit Log']) {
     await win.getByRole('link', { name }).click();
     await win.getByRole('heading', { name }).waitFor({ timeout: 5000 });
