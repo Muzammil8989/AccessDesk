@@ -55,9 +55,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
   function behind them. It applies to the form's role on create and on retry. A role in
   `AUTH_ADMIN_ROLES` (for example `manager`, if you list it) now needs a super-admin even on the form,
   and the super-admin role can no longer be given through onboarding. The `403` message names the role.
-- **The desktop's read allowlist is now six fixed paths** instead of any path of a certain shape:
-  `/employees`, `/employees/<uuid>`, `/templates`, `/onboarding/options`, `/checklists` and
-  `/checklists/<uuid>`.
+- **The desktop's read allowlist is now seven fixed paths** instead of any path of a certain shape:
+  `/employees`, `/employees/filter-options`, `/employees/<uuid>`, `/templates`,
+  `/onboarding/options`, `/checklists` and `/checklists/<uuid>`.
 - `GET /templates` returns each template's `departmentRef`, `defaultRole` and, per item, the `kind` (an
   enum) and `targetRef`. `GET /onboarding/options` returns each department's group `path`.
 - The step result of onboarding has an optional `label`, and the step names include
@@ -101,6 +101,13 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- **Employee detail (read only).** A name in the Employees list opens `/employees/:id`: the profile
+  (name, username, email and whether it is verified, status, when the account was created) and the
+  groups and roles the person holds directly. `GET /employees/:id` now also returns `groups` (`id`,
+  `name`, `path`) and `roles` (`name`, `description`); the provider's built-in roles are left out, and
+  if the memberships cannot be read the request fails instead of showing a person with none. Roles that
+  arrive through a group or a composite role are not shown, and the screen says so. "All employees"
+  returns to the same search, filters and page. Nothing on the screen changes the person.
 - **Onboarding, part 2** (ADR 0011).
   - **Templates:** an optional template on the Onboard form pre-fills the department and role, says so,
     lists in plain words what it will also do, and is disabled with a reason for someone who may not use

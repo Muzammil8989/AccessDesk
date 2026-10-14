@@ -218,8 +218,10 @@ tree and the testing conventions are in the [development guide](docs/development
   [design system](design-system/accessdesk/MASTER.md).
 - Employees list with search, pagination, and loading, empty and error states (desktop to API to
   identity provider)
-- API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id`, and the
-  onboarding and checklist routes below
+- Employee detail (read only): the profile and the groups and roles a person holds directly, opened
+  from a name in the Employees list
+- API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id` (the
+  profile with the groups and roles held directly), and the onboarding and checklist routes below
 - Onboarding ([ADR 0010](docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md),
   [ADR 0011](docs/adr/0011-onboarding-part-2-templates-checklists-manager-start-date.md)): the Onboard
   screen and `GET /onboarding/options`, `POST /onboarding` and `POST /onboarding/:subjectId/retry`. It
@@ -246,7 +248,7 @@ tree and the testing conventions are in the [development guide](docs/development
 - Offboard, Access Review and Audit Log screens (placeholders today)
 - The rest of Onboarding: bulk import (CSV), email, and a template editor (templates can be applied, but
   not yet created or edited in the app)
-- Employee detail and edit screens (the API route for one employee exists)
+- Employee edit (the detail screen is read only)
 - API routes for the identity provider's other write functions (disable, end sessions, remove groups
   and roles). The functions are implemented and tested, but no route calls them yet.
 - Identity providers other than the first one. The API depends on an interface, so one can be added

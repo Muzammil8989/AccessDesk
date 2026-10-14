@@ -171,7 +171,11 @@ Seven tables, snake_case through `@@map`: `onboarding_templates`, `template_item
   `role` (a realm role name), `first`, `max` up to 100; `groupId` and `role` cannot be combined; returns
   `items`, `total`, `capped`, `first` and `max`; an unknown group or role is `400` `unknown_group` or
   `unknown_role`), `GET /employees/filter-options` (the top-level groups and the non-built-in realm
-  roles, for the filter menus), `GET /employees/:id` (UUID only). A request with a `groupId` or `role`
+  roles, for the filter menus), `GET /employees/:id` (UUID only; the profile plus `groups` (`id`,
+  `name`, `path`: the groups the person was added to directly, a subgroup with its full path) and
+  `roles` (`name`, `description`: the realm roles held directly, the provider's built-in roles left
+  out), both sorted; if the groups or roles cannot be read the whole request fails, so a person is
+  never shown as having none). A request with a `groupId` or `role`
   filter has its own, lower rate limit (90 a minute per IP, counted apart from plain requests at 240),
   because the adapter reads every member for it. The onboarding routes (ADR 0010 and 0011):
   `GET /onboarding/options` (departments from the provider's groups with their path, and the roles with an `allowed` flag),
@@ -312,7 +316,7 @@ are tested, but no API route uses them yet.
   (`api.checklists.setItem`, `api.checklists.setClosed`). `ipc-contract.test.ts` checks every channel has a
   handler and a preload function.
 - **Renderer.** Hash routes: `/setup` (first-run wizard), `/login`, `/no-access`, and under the app
-  layout `/employees`, `/onboard`, `/onboard/checklists`, `/onboard/checklists/:subjectId`, `/offboard`,
+  layout `/employees`, `/employees/:id`, `/onboard`, `/onboard/checklists`, `/onboard/checklists/:subjectId`, `/offboard`,
   `/access-review`, `/audit-log`, `/settings`. The checklist screens use the existing `onboard` feature.
   Employees, Onboard (with its checklist screens) and Settings do real work, the rest are placeholders.
   The screens inside the signed-in shell are lazy-loaded (`router.tsx`), so the sign-in path does not pay
@@ -322,13 +326,13 @@ are tested, but no API route uses them yet.
   motion" setting is on. The hook `useReauthOn401` (`hooks/use-reauth-on-401.ts`) refetches the auth
   status when a screen gets a 401, so the shell sends the admin back to sign in instead of the screen
   showing a generic error.
-  Employees has one toolbar: debounced search (300 ms), a Status segmented control (Any, Active,
+  Employees has one toolbar: debounced search (300 ms), a Status segmented control (All, Active,
   Disabled), and Group and Role menus. A group and a role cannot be combined, so while one is chosen
   the other menu is disabled and says why ("Not available with a role"). The search, filters and page
   number live in the URL, so coming back from another screen restores them, and any change goes back
   to the first page. Applied filters show as removable chips. The header shows how many
   people there are and has an "Onboard employee" button. The table has three columns (Name with the
-  username under it, Email, Status). Pagination is 20 a page and says "at least N" with a notice when a
+  username under it, which links to the employee detail screen; Email; Status). Pagination is 20 a page and says "at least N" with a notice when a
   group or role list hit the member cap. There are loading, empty and error states. The filter menus
   come from `GET /employees/filter-options`. The screen retries only network and 5xx errors. Its query
   (`lib/employees-api.ts`) is reused by the manager picker. The settings form
@@ -366,6 +370,19 @@ are tested, but no API route uses them yet.
   one did not finish. A partial result opens the steps and offers Retry. Both offer "View in
   Employees". The password lives only in component state and is cleared when the admin leaves the page. If the response to a create is lost, the screen tells the admin to check the
   Employees list.
+- **Employee detail screen (read only).** `/employees/:id`, guarded by the same `employees` feature as
+  the list, lazy-loaded, from `GET /employees/:id`. The heading is the person's name (the username if
+  there is no name) and takes focus on arrival. Cards: Profile (name, username, email with a Verified
+  or Not verified label, Active or Disabled, account created), Groups (full paths, or "Not in any
+  group.") and Roles (name and description, or "No roles assigned directly."). The Groups and Roles
+  cards say that only direct memberships are shown, and that roles coming through a group or another
+  role, and the provider's own roles, are not. Nothing on the screen changes the person: its only
+  control is an "All employees" link. The list passes its search, filters and page to the detail
+  screen in the link's router state (`listSearch`), so "All employees" returns to the same list; a
+  person who opens the address directly goes to the plain list. An address that is not a UUID, or a
+  person the provider does not know (404), shows "Employee not found" (a bad address never reaches the
+  API). Other failures show the message and "Try again", and a 401 sends the admin back to sign in
+  (`useReauthOn401`). `EmployeeStatusBadge` is shared with the list.
 - **Checklist screens.** `/onboard/checklists` has an Open/Done radio filter, a table of 20 per page with
   the employee, manager, start date and progress, and links to the detail screen.
   `/onboard/checklists/:subjectId` shows the person, the manager, the start date and the tasks. A name that
@@ -459,8 +476,8 @@ lint-staged, pre-push runs typecheck and tests.
 
 - Onboarding part 2 is built (templates, checklists, manager, start date). Not built: bulk import (CSV),
   email, and a template editor (templates are applied, but created and edited only in the database or the
-  seed). Offboard, Access Review and Audit Log screens, and employee detail and edit screens, are not
-  built. Only the onboarding and checklist routes use the identity provider's write functions.
+  seed). Offboard, Access Review and Audit Log screens, and the employee edit screen, are not built.
+  The employee detail screen is built but read only. Only the onboarding and checklist routes use the identity provider's write functions.
 - Only the role rule (ADR 0011) and the loopback redirect were checked on a real instance of the first
   supported identity provider, on 9 October 2026. Everything else in onboarding part 1 is still
   unchecked there: Retry running only the missing step, the signed-in admin's ID in the provider's
@@ -474,7 +491,8 @@ lint-staged, pre-push runs typecheck and tests.
   (`DEFAULT_MEMBER_FILTER_CAP`): past it the list and the count are partial, `capped` is true and the
   screen shows a warning. The screen says the first two in plain words ("Direct members only; people
   in subgroups are not included." and "Only people who hold this role directly are shown."). Search and
-  the Status filter on their own are not affected: the provider does those. The group and role
+  the Status filter on their own are not affected: the provider does those. The employee detail screen
+  has the same limit for roles: it lists the roles a person holds directly. The group and role
   filters are checked against fakes only; the real-provider checks are in Phase 0.
 - **Scheduled actions (pg-boss):** a job that runs later has no logged-in admin token to forward.
   Decide between stored offline tokens and running the action when an admin next opens the app, before
@@ -494,7 +512,9 @@ lint-staged, pre-push runs typecheck and tests.
   fades and lazy-loaded screens).
 - Checked on a real identity provider (9 October 2026): the role rule and the loopback redirect only.
   Everything else, the Employees filters included, is tested against fakes only.
-- Placeholders: Offboard, Access Review, Audit Log, and employee detail and edit.
+- Also built: the read-only employee detail screen (profile, direct groups, direct roles), opened from
+  the Employees list.
+- Placeholders: Offboard, Access Review, Audit Log. Not built: employee edit.
 
 ## Next work
 
@@ -509,7 +529,7 @@ In this order:
    and a person who holds the role only through a group is absent from the role filter.
 2. **Offboarding** (ADR 0012, to be written before building).
 3. **Audit log** screen.
-4. **Employee detail and edit.**
+4. **Employee edit** (the read-only detail screen is built).
 5. **Template editor**, so templates no longer have to be changed in the database or the seed.
 
 ## Working style
