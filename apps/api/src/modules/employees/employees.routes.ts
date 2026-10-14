@@ -1,7 +1,7 @@
 import {
   employeeIdParamsSchema,
   listEmployeesQuerySchema,
-  type Employee,
+  type EmployeeDetail,
   type EmployeeFilterOptions,
   type EmployeeList,
 } from '@accessdesk/shared';
@@ -71,7 +71,7 @@ export function employeeRoutes(app: FastifyInstance, deps: EmployeeRouteDeps): v
     scope.get(
       '/employees/:id',
       { config: { rateLimit: plain } },
-      async (request): Promise<Employee> => {
+      async (request): Promise<EmployeeDetail> => {
         const { id } = employeeIdParamsSchema.parse(request.params);
         return serviceFor(request).get(id);
       },

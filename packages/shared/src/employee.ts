@@ -12,6 +12,14 @@ export const employeeSchema = z.object({
 });
 export type Employee = z.infer<typeof employeeSchema>;
 
+// What the detail screen shows besides the profile. Both lists are what the person holds directly:
+// a role that arrives through a group or a composite role is not in `roles`.
+export const employeeDetailSchema = employeeSchema.extend({
+  groups: z.array(z.object({ id: z.string(), name: z.string(), path: z.string() })),
+  roles: z.array(z.object({ name: z.string(), description: z.string().nullable() })),
+});
+export type EmployeeDetail = z.infer<typeof employeeDetailSchema>;
+
 export const MAX_PAGE_SIZE = 100;
 
 // A query string only carries text, and z.coerce.boolean() would turn 'false' into true.

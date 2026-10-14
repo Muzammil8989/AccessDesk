@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  employeeDetailSchema,
   employeeFilterOptionsSchema,
   employeeIdParamsSchema,
   employeeListSchema,
@@ -137,5 +138,33 @@ describe('employee list and filter option responses', () => {
 
     expect(employeeFilterOptionsSchema.parse(options)).toEqual(options);
     expect(employeeFilterOptionsSchema.safeParse({ groups: [], roles: [{}] }).success).toBe(false);
+  });
+
+  describe('employeeDetailSchema', () => {
+    const person = {
+      id: '8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11',
+      username: 'ann',
+      email: null,
+      firstName: null,
+      lastName: null,
+      enabled: true,
+      emailVerified: false,
+      createdAt: null,
+    };
+
+    it('is the profile plus the groups and roles held directly', () => {
+      const detail = {
+        ...person,
+        groups: [{ id: 'g1', name: 'Platform', path: '/Engineering/Platform' }],
+        roles: [{ name: 'developer', description: null }],
+      };
+
+      expect(employeeDetailSchema.parse(detail)).toEqual(detail);
+    });
+
+    it('needs both lists, so an older API answer is not shown as a person with no access', () => {
+      expect(employeeDetailSchema.safeParse(person).success).toBe(false);
+      expect(employeeDetailSchema.safeParse({ ...person, groups: [] }).success).toBe(false);
+    });
   });
 });

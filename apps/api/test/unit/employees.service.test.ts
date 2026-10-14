@@ -176,19 +176,70 @@ describe('EmployeesService', () => {
           'emailVerified',
           'enabled',
           'firstName',
+          'groups',
           'id',
           'lastName',
+          'roles',
           'username',
         ].sort(),
       );
+      expect(Object.keys(employee.groups[0]!).sort()).toEqual(['id', 'name', 'path']);
+      expect(Object.keys(employee.roles[0]!).sort()).toEqual(['description', 'name']);
     });
 
-    it('asks the provider for exactly that employee', async () => {
+    it('lists the groups and roles the person holds directly, sorted', async () => {
+      const { service, fake, ids, engineering, sales } = await seeded();
+      await fake.provider.addUserToGroup(ids.ann!, sales);
+      await fake.provider.addUserRoles(ids.ann!, ['manager']);
+
+      const employee = await service.get(ids.ann!);
+
+      expect(employee.groups).toEqual([
+        { id: engineering, name: 'Engineering', path: '/Engineering' },
+        { id: sales, name: 'Sales', path: '/Sales' },
+      ]);
+      expect(employee.roles.map((role) => role.name)).toEqual(['developer', 'manager']);
+    });
+
+    it("hides the provider's built-in roles", async () => {
+      const { service, fake, ids } = await seeded();
+      await fake.provider.addUserRoles(ids.ann!, ['offline_access']);
+
+      expect((await service.get(ids.ann!)).roles.map((role) => role.name)).toEqual(['developer']);
+    });
+
+    it('returns empty lists for a person with no groups or roles', async () => {
+      const { service, fake } = await seeded();
+      const newcomer = await fake.provider.createUser({ username: 'newcomer' });
+
+      expect(await service.get(newcomer)).toMatchObject({ groups: [], roles: [] });
+    });
+
+    it('asks the provider for exactly that employee, and reads nothing else for a missing one', async () => {
       const getUser = vi.fn().mockRejectedValue(new IdentityProviderError(404, 'nope'));
-      const service = new EmployeesService({ getUser } as unknown as IdentityProvider);
+      const getUserGroups = vi.fn();
+      const getUserRoles = vi.fn();
+      const service = new EmployeesService({
+        getUser,
+        getUserGroups,
+        getUserRoles,
+      } as unknown as IdentityProvider);
 
       await expect(service.get('abc')).rejects.toMatchObject({ status: 404 });
       expect(getUser).toHaveBeenCalledWith('abc');
+      expect(getUserGroups).not.toHaveBeenCalled();
+      expect(getUserRoles).not.toHaveBeenCalled();
     });
+
+    it.each(['getUserGroups', 'getUserRoles'] as const)(
+      'lets a failing %s propagate instead of showing a half-empty person',
+      async (method) => {
+        const { service, fake, ids } = await seeded();
+        const boom = new IdentityProviderError(500, 'down');
+        fake.failNext(method, boom);
+
+        await expect(service.get(ids.ann!)).rejects.toBe(boom);
+      },
+    );
   });
 });
