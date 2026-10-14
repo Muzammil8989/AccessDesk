@@ -103,6 +103,19 @@ action, outcome from app_audit_log order by created_at desc limit 10;`) Retry ad
 10. **Manager.** The manager's name shows on the checklist, the start-date text says the account is not
     delayed, and a disabled manager cannot be chosen.
 
+**Employees filters** (these cover direct members only and stop at 2000 people; see the notices on the
+screen)
+
+11. **Status with search.** Disable one test user. Search for part of their username with Status set to
+    Active: they are absent and the count drops. Set Status to Disabled: only they show, and the count
+    agrees with the list.
+12. **Subgroup member.** Put a test user only in a subgroup of a top-level group (for example
+    `/Engineering/Platform`). Filter by `Engineering`: the user is absent, and the screen says "Direct
+    members only; people in subgroups are not included." Add them to `/Engineering` itself: they appear.
+13. **Role through a group.** Give a group a realm role, and put a test user in that group only. Filter by
+    that role: the user is absent, and the screen says "Only people who hold this role directly are
+    shown." Assign the role to the user directly: they appear.
+
 ## Why the admin's own token
 
 Keycloak's admin events record who made a change. Forwarding the logged-in admin's own token (instead of
