@@ -202,7 +202,7 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
           orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
           skip: 20,
           take: 20,
-          include: { items: { select: { status: true } } },
+          include: { template: { select: { name: true } }, items: { select: { status: true } } },
         });
         expect(result.total).toBe(41);
         expect(result.items).toEqual([
@@ -213,6 +213,7 @@ describe('PrismaChecklistRepository (against a mocked client)', () => {
             completedAt: null,
             totalCount: 2,
             doneCount: 1,
+            templateName: 'Developer',
             managerSubjectId: null,
             startDate: null,
           },

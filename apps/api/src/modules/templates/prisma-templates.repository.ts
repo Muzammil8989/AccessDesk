@@ -10,6 +10,7 @@ interface StoredTemplate {
   description: string | null;
   departmentRef: string | null;
   defaultRole: string | null;
+  isDefault: boolean;
   items: {
     id: string;
     title: string;
@@ -28,6 +29,7 @@ function toTemplate(stored: StoredTemplate): Template {
     description: stored.description,
     departmentRef: stored.departmentRef,
     defaultRole,
+    isDefault: stored.isDefault,
     items: stored.items.map((item) => ({
       id: item.id,
       title: item.title,
@@ -53,6 +55,16 @@ export class PrismaTemplateRepository implements TemplateRepository {
   async findById(id: string): Promise<Template | null> {
     const template = await this.prisma.onboardingTemplate.findUnique({
       where: { id },
+      include: INCLUDE_ITEMS,
+    });
+    return template ? toTemplate(template) : null;
+  }
+
+  async findDefault(): Promise<Template | null> {
+    // Oldest first, then by id, so two rows flagged by mistake still give one stable answer.
+    const template = await this.prisma.onboardingTemplate.findFirst({
+      where: { isDefault: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       include: INCLUDE_ITEMS,
     });
     return template ? toTemplate(template) : null;

@@ -1,6 +1,6 @@
 import type { IdentityProvider } from '@accessdesk/identity';
 import type {
-  Employee,
+  EmployeeDetail,
   EmployeeFilterOptions,
   EmployeeList,
   ListEmployeesQuery,
@@ -9,6 +9,7 @@ import { AppError } from '../../errors';
 import { toEmployee } from './employees.mapper';
 
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+const byPath = (a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path);
 
 export class EmployeesService {
   constructor(private readonly identity: IdentityProvider) {}
@@ -35,8 +36,24 @@ export class EmployeesService {
     };
   }
 
-  async get(id: string): Promise<Employee> {
-    return toEmployee(await this.identity.getUser(id));
+  async get(id: string): Promise<EmployeeDetail> {
+    // The person first, so a missing one is a clean 404 before any membership is read.
+    const user = await this.identity.getUser(id);
+    const [groups, roles] = await Promise.all([
+      this.identity.getUserGroups(id),
+      this.identity.getUserRoles(id),
+    ]);
+    return {
+      ...toEmployee(user),
+      groups: groups
+        .map((group) => ({ id: group.id, name: group.name, path: group.path }))
+        .sort(byPath),
+      // The provider's own roles (offline access and the like) are noise to an HR admin.
+      roles: roles
+        .filter((role) => !role.builtin)
+        .map(({ name, description }) => ({ name, description }))
+        .sort(byName),
+    };
   }
 
   async filterOptions(): Promise<EmployeeFilterOptions> {

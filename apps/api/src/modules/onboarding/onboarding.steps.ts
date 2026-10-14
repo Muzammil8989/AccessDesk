@@ -76,10 +76,19 @@ export interface ChecklistTask {
   description: string | null;
 }
 
-export interface CreateChecklistStepOptions {
-  checklists: Pick<ChecklistRepository, 'create'>;
+/** Where a checklist's tasks come from: the template that supplies them, and the tasks. */
+export interface ChecklistSource {
   templateId: string | null;
   tasks: readonly ChecklistTask[];
+}
+
+export interface CreateChecklistStepOptions {
+  checklists: Pick<ChecklistRepository, 'create'>;
+  /**
+   * Called only when the checklist is created, so a checklist that exists costs no lookup and a
+   * failed lookup fails this step, not the whole onboarding.
+   */
+  resolveSource: () => Promise<ChecklistSource>;
   managerSubjectId: string | null;
   startDate: string | null;
   actorId: string;
@@ -88,26 +97,29 @@ export interface CreateChecklistStepOptions {
 }
 
 export function createChecklistStep(options: CreateChecklistStepOptions): OnboardingStep {
-  const { checklists, templateId, tasks, managerSubjectId, startDate, actorId, now, satisfied } =
+  const { checklists, resolveSource, managerSubjectId, startDate, actorId, now, satisfied } =
     options;
+  let source: ChecklistSource | null = null;
   return {
     name: 'create_checklist',
     satisfied,
     details: () => ({
-      taskCount: String(tasks.length),
-      ...(templateId && { templateId }),
+      ...(source && { taskCount: String(source.tasks.length) }),
+      ...(source?.templateId && { templateId: source.templateId }),
       ...(managerSubjectId && { managerSubjectId }),
       ...(startDate && { startDate }),
     }),
-    run: async (context) =>
-      checklists.create({
+    run: async (context) => {
+      source = await resolveSource();
+      await checklists.create({
         subjectId: requireSubject(context),
-        templateId,
+        templateId: source.templateId,
         createdBy: actorId,
         at: now(),
         managerSubjectId,
         startDate,
-        tasks: [...tasks],
-      }),
+        tasks: [...source.tasks],
+      });
+    },
   };
 }

@@ -12,11 +12,12 @@ beforeAll(async () => {
 
 const NOW = new Date('2026-10-09T12:00:00.000Z');
 const MISSING = '00000000-0000-4000-8000-0000000000ff';
+const GENERAL_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e99';
 
 async function setup() {
   const fake = createInMemoryIdentityProvider();
   const audit = new InMemoryAuditRepository(() => NOW);
-  const checklists = new InMemoryChecklistRepository(audit, {});
+  const checklists = new InMemoryChecklistRepository(audit, { [GENERAL_ID]: 'General onboarding' });
   const app = await buildTestApp(harness, {
     identity: fake.provider,
     audit,
@@ -107,6 +108,7 @@ describe('GET /checklists', () => {
     const bob = await s.employee('bob');
     const older = s.checklists.seed(ann, ['A', 'B', 'C'], {
       createdAt: new Date('2026-10-01T00:00:00Z'),
+      templateId: GENERAL_ID,
     });
     older.items[0]!.status = 'done';
     s.checklists.seed(bob, ['A'], { createdAt: new Date('2026-10-05T00:00:00Z') });
@@ -126,6 +128,7 @@ describe('GET /checklists', () => {
           completedAt: null,
           totalCount: 1,
           doneCount: 0,
+          templateName: null,
           person: { displayName: 'bob', username: 'bob' },
           manager: null,
           startDate: null,
@@ -137,6 +140,7 @@ describe('GET /checklists', () => {
           completedAt: null,
           totalCount: 3,
           doneCount: 1,
+          templateName: 'General onboarding',
           person: { displayName: 'Ann Lee', username: 'ann.lee' },
           manager: null,
           startDate: null,

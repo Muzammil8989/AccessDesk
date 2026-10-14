@@ -45,12 +45,13 @@ export class InMemoryChecklistRepository implements ChecklistRepository {
       status?: StoredRow['status'];
       managerSubjectId?: string;
       startDate?: string;
+      templateId?: string;
     } = {},
   ): StoredRow {
     const row: StoredRow = {
       id: nextId(),
       subjectId,
-      templateId: null,
+      templateId: options.templateId ?? null,
       createdBy: 'admin-1',
       createdAt: options.createdAt ?? new Date('2026-10-09T09:00:00.000Z'),
       completedAt: null,
@@ -114,6 +115,7 @@ export class InMemoryChecklistRepository implements ChecklistRepository {
         completedAt: row.completedAt,
         totalCount: row.items.length,
         doneCount: row.items.filter((item) => item.status === 'done').length,
+        templateName: row.templateId ? (this.templateNames[row.templateId] ?? null) : null,
         managerSubjectId: row.managerSubjectId,
         startDate: row.startDate,
       }));

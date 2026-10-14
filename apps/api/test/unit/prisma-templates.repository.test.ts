@@ -23,6 +23,7 @@ describe('PrismaTemplateRepository', () => {
         description: 'Sales hires',
         departmentRef: '/Sales',
         defaultRole: 'member',
+        isDefault: false,
         createdAt: new Date(),
         updatedAt: new Date(),
         items: [
@@ -48,6 +49,7 @@ describe('PrismaTemplateRepository', () => {
       description: 'Sales hires',
       departmentRef: '/Sales',
       defaultRole: 'member',
+      isDefault: false,
       items: [
         {
           id: 'i1',
@@ -68,6 +70,7 @@ describe('PrismaTemplateRepository', () => {
       description: null,
       departmentRef: '/Engineering',
       defaultRole: 'manager',
+      isDefault: false,
       items: [],
     });
     const prisma = { onboardingTemplate: { findUnique } } as unknown as PrismaClient;
@@ -93,6 +96,67 @@ describe('PrismaTemplateRepository', () => {
     expect(await new PrismaTemplateRepository(prisma).findById('missing')).toBeNull();
   });
 
+  describe('findDefault', () => {
+    const stored = {
+      id: 'g1',
+      name: 'General onboarding',
+      description: null,
+      departmentRef: null,
+      defaultRole: null,
+      isDefault: true,
+      items: [
+        {
+          id: 'gi1',
+          templateId: 'g1',
+          title: 'Hand over laptop',
+          description: null,
+          kind: 'MANUAL_TASK',
+          targetRef: null,
+          position: 0,
+        },
+      ],
+    };
+
+    it('asks for the oldest flagged template, then the lowest id, with items in position order', async () => {
+      const findFirst = vi.fn().mockResolvedValue(stored);
+      const prisma = { onboardingTemplate: { findFirst } } as unknown as PrismaClient;
+
+      const template = await new PrismaTemplateRepository(prisma).findDefault();
+
+      expect(findFirst).toHaveBeenCalledWith({
+        where: { isDefault: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: { items: { orderBy: { position: 'asc' } } },
+      });
+      expect(template).toEqual({
+        id: 'g1',
+        name: 'General onboarding',
+        description: null,
+        departmentRef: null,
+        defaultRole: null,
+        isDefault: true,
+        items: [
+          {
+            id: 'gi1',
+            title: 'Hand over laptop',
+            description: null,
+            kind: 'MANUAL_TASK',
+            targetRef: null,
+            position: 0,
+          },
+        ],
+      });
+    });
+
+    it('returns null when no template is flagged', async () => {
+      const prisma = {
+        onboardingTemplate: { findFirst: vi.fn().mockResolvedValue(null) },
+      } as unknown as PrismaClient;
+
+      expect(await new PrismaTemplateRepository(prisma).findDefault()).toBeNull();
+    });
+  });
+
   it('ignores a stored default role that is not one of the onboardable roles', async () => {
     const findMany = vi.fn().mockResolvedValue([
       {
@@ -101,6 +165,7 @@ describe('PrismaTemplateRepository', () => {
         description: null,
         departmentRef: null,
         defaultRole: 'owner',
+        isDefault: false,
         items: [],
       },
     ]);

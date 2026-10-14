@@ -101,3 +101,36 @@ AccessDesk itself, so applying templates is a way to raise someone's access.
     not created yet, Retry is refused with `manager_disabled` until the manager is enabled again.
 - The start date can mislead if read as "the account unlocks that day". The screens say it does not.
 - A tick that cannot write its audit row is rolled back, and the admin sees an error and can try again.
+
+## Update, 14 October 2026: every onboarding creates a checklist
+
+The rule "a checklist exists only when the template has manual tasks, or a manager or a start date is
+given" is replaced. A checklist that holds only a manager or a start date is not useful, and the
+requirement is that the onboarding form starts a checklist.
+
+- **Always.** `create_checklist` runs for every onboarding once the earlier steps succeeded. The manager
+  and the start date only add information to the checklist. They no longer decide whether one exists.
+- **Default template.** `onboarding_templates.is_default` (new column, `false` for every existing row)
+  flags one template, seeded as **General onboarding**, which holds four manual tasks (Hand over laptop,
+  Create email account, Hand over access card, Introduce to the team and manager). If the admin chose no
+  template, or the template has no manual tasks, the checklist takes the default's tasks. A template with
+  its own manual tasks uses only those. The checklist's `template_id` is the template the tasks came from,
+  and the list and detail screens show it ("Tasks from").
+- **Read inside the step.** The default is looked up when the checklist is created, not before the
+  account. A database failure fails only `create_checklist` (`207`, Retry), like any other step, and a
+  checklist that already exists is not changed, so Retry looks nothing up and never makes a second one
+  (one per `(subject_id, type)` still holds).
+- **No default row.** If the database has no default template the checklist is still created, empty,
+  and a warning is logged. It stays open until someone marks it as done, as before.
+- **Role rule untouched.** The default carries no group or role item, so `roleViolation` and
+  `templateViolation` have nothing to check for it.
+- **Several defaults.** The database does not enforce a single default (Prisma cannot express a partial
+  unique index, and `migrate dev` would try to drop it). The API takes the oldest flagged row, then the
+  lowest id, so two flagged rows by mistake still give one stable answer.
+- **Migration and seed.** The migration only adds the column (`ADD COLUMN IF NOT EXISTS`). It does not
+  create a template and does not touch a template or a checklist. The seed is now create-only-if-missing
+  for all four templates, so it never changes one that exists. Edits to `seed.ts` do not reach an
+  existing database. People onboarded before this change keep the checklist they have, or none.
+- **For the future template editor.** It **must not archive or delete the default template**, and it
+  **must not allow group or role items on it**: only manual tasks. Both would break "every onboarding
+  has a checklist" or the role rule above.

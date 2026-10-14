@@ -18,7 +18,7 @@ export function ChecklistDetailPage() {
   const facts = detail
     ? [
         detail.person ? `Username ${detail.person.username}` : 'Not found in the identity provider',
-        detail.templateName ? `Template ${detail.templateName}` : null,
+        detail.templateName ? `Tasks from ${detail.templateName}` : null,
         detail.manager ? `Manager ${detail.manager.person?.displayName ?? 'unknown'}` : null,
         detail.startDate ? `Start date ${formatDay(detail.startDate)}` : null,
         `Onboarded ${formatDate(detail.createdAt)}`,

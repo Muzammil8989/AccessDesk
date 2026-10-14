@@ -1,22 +1,13 @@
 import { canAccess, type Employee } from '@accessdesk/shared';
 import { useQuery } from '@tanstack/react-query';
-import {
-  ChevronLeft,
-  ChevronRight,
-  CircleCheck,
-  CircleSlash,
-  SearchX,
-  UserPlus,
-  Users,
-  X,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, SearchX, UserPlus, Users, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { EmployeeStatusBadge } from '@/components/employee-status-badge';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Avatar } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SearchField } from '@/components/ui/search-field';
 import { SegmentedControl } from '@/components/ui/segmented-control';
@@ -428,7 +419,11 @@ export function EmployeesPage() {
               {data?.items.map((employee) => (
                 <TableRow key={employee.id}>
                   <TableCell>
-                    <div className="flex items-center gap-3">
+                    <Link
+                      to={`/employees/${employee.id}`}
+                      state={{ listSearch: params.toString() }}
+                      className="flex items-center gap-3 rounded-xs outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    >
                       <Avatar name={nameOf(employee) || employee.username} />
                       <div className="min-w-0">
                         <p className="truncate text-body-large">{nameOf(employee) || '—'}</p>
@@ -436,20 +431,13 @@ export function EmployeesPage() {
                           {employee.username}
                         </p>
                       </div>
-                    </div>
+                    </Link>
                   </TableCell>
                   <TableCell className="break-all text-on-surface-variant">
                     {employee.email ?? '—'}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={employee.enabled ? 'success' : 'secondary'}>
-                      {employee.enabled ? (
-                        <CircleCheck aria-hidden="true" />
-                      ) : (
-                        <CircleSlash aria-hidden="true" />
-                      )}
-                      {employee.enabled ? 'Active' : 'Disabled'}
-                    </Badge>
+                    <EmployeeStatusBadge enabled={employee.enabled} />
                   </TableCell>
                 </TableRow>
               ))}

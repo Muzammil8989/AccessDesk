@@ -243,15 +243,46 @@ describe('GET /employees/:id', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('returns the employee', async () => {
-    const identity = { getUser: vi.fn().mockResolvedValue(identityUser) };
+  it('returns the employee with the groups and roles they hold directly', async () => {
+    const identity = {
+      getUser: vi.fn().mockResolvedValue(identityUser),
+      getUserGroups: vi
+        .fn()
+        .mockResolvedValue([{ id: 'g1', name: 'Platform', path: '/Engineering/Platform' }]),
+      getUserRoles: vi.fn().mockResolvedValue([
+        { name: 'developer', description: 'Writes code', builtin: false },
+        { name: 'offline_access', description: null, builtin: true },
+      ]),
+    };
     const token = await harness.makeToken();
     const app = await buildTestApp(harness, { identity });
 
     const res = await app.inject({ url: `/employees/${USER_ID}`, headers: bearer(token) });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ id: USER_ID, username: 'ann' });
+    expect(res.json()).toMatchObject({
+      id: USER_ID,
+      username: 'ann',
+      groups: [{ id: 'g1', name: 'Platform', path: '/Engineering/Platform' }],
+      roles: [{ name: 'developer', description: 'Writes code' }],
+    });
+    expect(res.headers['cache-control']).toBe('no-store');
     expect(identity.getUser).toHaveBeenCalledWith(USER_ID);
+    expect(identity.getUserGroups).toHaveBeenCalledWith(USER_ID);
+    expect(identity.getUserRoles).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it('answers 502 when the memberships cannot be read, not a person with none', async () => {
+    const identity = {
+      getUser: vi.fn().mockResolvedValue(identityUser),
+      getUserGroups: vi.fn().mockRejectedValue(new IdentityProviderError(500, 'down')),
+      getUserRoles: vi.fn().mockResolvedValue([]),
+    };
+    const token = await harness.makeToken();
+    const app = await buildTestApp(harness, { identity });
+
+    const res = await app.inject({ url: `/employees/${USER_ID}`, headers: bearer(token) });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).toBe('identity_error');
   });
 
   it.each([

@@ -98,10 +98,24 @@ action, outcome from app_audit_log order by created_at desc limit 10;`) Retry ad
    Retry works after you create the role.
 8. **Privileged template.** As `hr-admin`, the HR template (or any template with `admin`) is disabled and
    the API refuses it. As `super-admin` it works.
-9. **Checklist.** Tick and untick a task, and see the audit row. A checklist with a manager and a start date
-   and no tasks stays in the Open list until you mark it as done.
+9. **Checklist.** Every onboarding creates one. With no template it starts with the four General
+   onboarding tasks; a template with its own manual tasks uses only those. Tick and untick a task, and
+   see the audit row. A checklist closes itself when its last task is ticked.
 10. **Manager.** The manager's name shows on the checklist, the start-date text says the account is not
     delayed, and a disabled manager cannot be chosen.
+
+**Employees filters** (these cover direct members only and stop at 2000 people; see the notices on the
+screen)
+
+11. **Status with search.** Disable one test user. Search for part of their username with Status set to
+    Active: they are absent and the count drops. Set Status to Disabled: only they show, and the count
+    agrees with the list.
+12. **Subgroup member.** Put a test user only in a subgroup of a top-level group (for example
+    `/Engineering/Platform`). Filter by `Engineering`: the user is absent, and the screen says "Direct
+    members only; people in subgroups are not included." Add them to `/Engineering` itself: they appear.
+13. **Role through a group.** Give a group a realm role, and put a test user in that group only. Filter by
+    that role: the user is absent, and the screen says "Only people who hold this role directly are
+    shown." Assign the role to the user directly: they appear.
 
 ## Why the admin's own token
 

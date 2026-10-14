@@ -35,11 +35,11 @@ of the code only knows a provider-neutral interface.
 - Monorepo: pnpm 12.9.1 workspaces + Turborepo 2.11.7. Node 22.22.1 or newer (`.nvmrc` says 24).
 - `apps/desktop`: Electron 44.5.1, electron-vite 5.0.0, Vite 7.3.7 (electron-vite 5 does not support
   Vite 8), React 19.3.0, `@vitejs/plugin-react` 5.2.0, Tailwind 4.3.3, shadcn/ui-style components
-  (hand-written: Radix Slot and Label, class-variance-authority, clsx, tailwind-merge, lucide-react),
-  React Hook Form 7.89.0 with `@hookform/resolvers`, Zod 4.6.5, TanStack Query 5.104.1, React Router
-  8.4.0 (hash router). Inter Variable is bundled locally (`@fontsource-variable/inter`): the CSP is
-  `font-src 'self'` and the app must work offline. Design tokens and rules are in
-  `design-system/accessdesk/MASTER.md`.
+  (hand-written: Radix Slot, Label and Tooltip, class-variance-authority, clsx, tailwind-merge,
+  lucide-react), React Hook Form 7.89.0 with `@hookform/resolvers`, Zod 4.6.5, TanStack Query 5.104.1,
+  React Router 8.4.0 (hash router). Roboto Flex Variable is bundled locally
+  (`@fontsource-variable/roboto-flex`): the CSP is `font-src 'self'` and the app must work offline.
+  Design tokens and rules are in `design-system/accessdesk/MASTER.md`.
 - `apps/api`: Node.js, Fastify 5.12.5, `@fastify/helmet`, `@fastify/rate-limit`, Prisma **7.10.0**
   (stable; npm's `latest` tag is an 8.0 release candidate) with `@prisma/adapter-pg`, pg-boss 12.37.0
   (stub), jose 6.2.12, pino (through Fastify) with pino-pretty in development, tsup for the build.
@@ -62,8 +62,8 @@ of the code only knows a provider-neutral interface.
    main process.
 3. **Electron hardening:** `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, strict
    Content Security Policy, navigation and new windows blocked, webviews blocked, every permission
-   request refused except clipboard write for the app's own page, a minimal typed preload API, IPC handlers that answer only the app's own top-level
-   page.
+   request refused except clipboard write for the app's own page, a minimal typed preload API, IPC
+   handlers that answer only the app's own top-level page.
 4. **Tokens are stored with Electron `safeStorage`** (OS secure storage), never in plain files or
    `localStorage`. Without secure storage they stay in memory only. The renderer never sees a token.
 5. **The API verifies the access token on every request** (signature via the provider's signing keys,
@@ -147,11 +147,18 @@ Seven tables, snake_case through `@@map`: `onboarding_templates`, `template_item
 - **Templates.** `onboarding_templates` has `department_ref` (a top-level group path such as
   `/Engineering`) and `default_role` (`member`, `manager` or `admin`), which pre-fill the form. A
   template's items name an extra group path (`GROUP_MEMBERSHIP`), a realm role name (`ROLE`) or a manual
-  task (`MANUAL_TASK`) in `target_ref`. The seed creates Developer, Sales and HR in this shape and is safe
-  to run again.
+  task (`MANUAL_TASK`) in `target_ref`. `is_default` (a boolean, false unless set) flags the one default
+  template, **General onboarding**: manual tasks only (Hand over laptop, Create email account, Hand over
+  access card, Introduce to the team and manager), no department, no default role and no group or role
+  item, so the role rule is never involved. The seed creates General onboarding, Developer, Sales and HR.
+  **The seed is create-only-if-missing**: a template that already exists, edited or not, is never
+  touched, so running the seed again is safe, but editing `seed.ts` later does not reach an existing
+  database (change the rows there instead). Nothing enforces a single default in the database; the API
+  uses the oldest flagged row (`created_at`, then `id`).
 - **Checklists.** `employee_checklists` is unique on `(subject_id, type)`. It has a `status` (`OPEN`,
   `COMPLETED`, `CANCELLED`), `manager_subject_id` (text) and `start_date` (a `DATE`, information only).
-  `checklist_items` are the template's manual tasks, copied in.
+  `checklist_items` are the manual tasks, copied in from the chosen template, or from the default
+  template when that has none. `template_id` is the template the tasks came from.
 - **Audit log.** `app_audit_log` is append-only (triggers block updates, deletes and truncation) and
   records an `outcome` and a `request_id`. `offboarding_snapshots` keep `client_roles` and `was_enabled`.
 - **Migrations** (older ones are history and are never edited): `init`; a subject-ID and audit-log
@@ -159,22 +166,33 @@ Seven tables, snake_case through `@@map`: `onboarding_templates`, `template_item
   the template department and default role and the unique checklist constraint; a narrow data
   migration that moves a template's department out of its items (only when `department_ref` is empty
   and the template has exactly one group item; others are left alone and listed in a notice); and one
-  that adds the checklist manager and start date. After pulling, apply new migrations to an existing
+  that adds the checklist manager and start date; and one that adds `onboarding_templates.is_default`
+  (the column only: existing rows get `false`, no template or checklist is touched). After pulling, apply new migrations to an existing
   database with `pnpm --filter @accessdesk/api db:deploy`.
 - Generator: `prisma-client`, output `apps/api/src/generated/prisma` (git-ignored).
 
 ### API (`apps/api`)
 
 - Routes: `GET /health` (liveness), `GET /ready` (readiness, 503 with no detail if the database does
-  not answer), `GET /templates` (each template with its department, default role and items),
-  `GET /employees` (query: `search`, `first`, `max` up to 100, returns items plus `total`),
-  `GET /employees/:id` (UUID only), the onboarding routes (ADR 0010 and 0011): `GET /onboarding/options`
-  (departments from the provider's groups with their path, and the roles with an `allowed` flag),
+  not answer), `GET /templates` (each template with its department, default role, `isDefault` and items),
+  `GET /employees` (query: `search`, `enabled` (`true` or `false`), `groupId` (a top-level group's id),
+  `role` (a realm role name), `first`, `max` up to 100; `groupId` and `role` cannot be combined; returns
+  `items`, `total`, `capped`, `first` and `max`; an unknown group or role is `400` `unknown_group` or
+  `unknown_role`), `GET /employees/filter-options` (the top-level groups and the non-built-in realm
+  roles, for the filter menus), `GET /employees/:id` (UUID only; the profile plus `groups` (`id`,
+  `name`, `path`: the groups the person was added to directly, a subgroup with its full path) and
+  `roles` (`name`, `description`: the realm roles held directly, the provider's built-in roles left
+  out), both sorted; if the groups or roles cannot be read the whole request fails, so a person is
+  never shown as having none). A request with a `groupId` or `role`
+  filter has its own, lower rate limit (90 a minute per IP, counted apart from plain requests at 240),
+  because the adapter reads every member for it. The onboarding routes (ADR 0010 and 0011):
+  `GET /onboarding/options` (departments from the provider's groups with their path, and the roles with an `allowed` flag),
   `POST /onboarding` (`201`, or `207` with `status: 'partial'` when a step after `create_user` failed) and
   `POST /onboarding/:subjectId/retry` (`200` or `207`), and the checklist routes: `GET /checklists`
   (`status=open|done`, `first`, `max` at most 20), `GET /checklists/:subjectId`,
   `PATCH /checklists/:subjectId/items/:itemId` (body `{ done }`) and `PATCH /checklists/:subjectId` (body
-  `{ closed }`). Only the three onboarding routes (`GET /onboarding/options`, `POST /onboarding`,
+  `{ closed }`). Each list row and the detail carry `templateName`, the
+  template the tasks came from. Only the three onboarding routes (`GET /onboarding/options`, `POST /onboarding`,
   `POST /onboarding/:subjectId/retry`) are limited to 20 requests a minute per IP, per route. The
   checklist routes have no limit of their own and fall under the global limit (default 300 a minute).
   Both groups answer with `Cache-Control: no-store`. Error codes: `username_exists` and `email_exists`
@@ -197,11 +215,19 @@ Seven tables, snake_case through `@@map`: `onboarding_templates`, `template_item
   equal to the department, and duplicates, are skipped. A group or role that does not exist in the
   identity provider fails only its own step with a clear message (`207`), and Retry finishes it once the
   name exists. Only top-level groups and realm roles can be matched. `MANUAL_TASK` items are never run.
-- **Checklists.** The `create_checklist` step creates one onboarding checklist when the template has
-  manual tasks, or a manager is given, or a start date is given. A checklist is never created as done. It
-  is `open` until it is closed: with tasks it closes itself when the last task is ticked and reopens if one
-  is unticked; with no tasks it stays in the Open list until `PATCH /checklists/:subjectId` closes it
-  (`409 checklist_has_tasks` for one that has tasks). A tick or a close and its audit row
+  The default template is hidden from the template picker (the form reads it from `GET /templates` to
+  show its tasks) and must keep only manual tasks.
+- **Checklists.** Every onboarding creates one onboarding checklist: the `create_checklist` step always
+  runs once the earlier steps succeeded. Its tasks are the chosen template's manual tasks; if there is no
+  template, or it has none, they are the default template's (General onboarding). A template with its own
+  manual tasks uses only those. The default is read inside the step, and only when the checklist is
+  created, so a database failure fails that step (`207`, Retry) instead of the whole onboarding, and Retry
+  on a checklist that exists looks nothing up. If no default template exists the checklist is still
+  created, empty, and a warning is logged. A manager or start date is only information on it and never
+  decides whether one exists. A checklist is never created as done. It is `open` until it is closed: with
+  tasks it closes itself when the last task is ticked and reopens if one is unticked; with no tasks (only
+  possible without a default template) it stays in the Open list until `PATCH /checklists/:subjectId`
+  closes it (`409 checklist_has_tasks` for one that has tasks). A tick or a close and its audit row
   (`checklist.item_done`, `checklist.item_undone`, `checklist.close`, `checklist.reopen`) are written in one
   database transaction, after locking the checklist row. Names, the manager's included, are looked up
   live (five at a time) and show as unknown when a lookup fails. They are never saved.
@@ -243,7 +269,9 @@ keyResolver?, fetch?, clock?, generatePassword?, logStream? }`, where `identityF
 ### Identity provider adapter (`packages/identity` and `packages/identity-keycloak`)
 
 `packages/identity` (`@accessdesk/identity`) holds the provider-neutral `IdentityProvider` interface:
-`listUsers`, `countUsers`, `findUsers` (exact username or email), `getUser`, `createUser` (with
+`listUsersPage` (search, `enabled`, `groupId` or `role`, `first`, `max`; returns `users`, `total` and a
+`capped` flag that is true when a group or role list reached the 2000-member cap, so `total` is then a
+lower bound), `findUsers` (exact username or email), `getUser`, `createUser` (with
 optional `emailVerified` and a temporary `initialPassword`), `disableUser`, `endAllSessions`,
 `listGroups`, `getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `listRoles`, `getUserRoles`,
 `addUserRoles`, `removeUserRoles`. It also
@@ -261,9 +289,10 @@ provider. Only `src/keycloak-api.ts` knows its admin REST paths and raw response
 `createKeycloakIdentityProvider({ issuerUrl, getToken, fetch? })`. It derives the admin API base URL
 and the realm from the issuer URL and throws a clear error when it cannot. Role names are resolved to
 representations internally. Responses are validated with Zod. Failures throw `IdentityProviderError`
-with the status and never the token. The onboarding and checklist routes use `createUser`, `findUsers`,
-`getUser`, `listGroups`, `addUserToGroup`, `getUserGroups`, `listRoles`, `getUserRoles` and `addUserRoles`. The other write
-functions exist and are tested, but no API route uses them yet.
+with the status and never the token. The employee routes use `listUsersPage`, `getUser`, `listGroups`
+and `listRoles`. The onboarding and checklist routes use `createUser`, `findUsers`, `getUser`, `listGroups`, `addUserToGroup`,
+`getUserGroups`, `listRoles`, `getUserRoles` and `addUserRoles`. The other write functions exist and
+are tested, but no API route uses them yet.
 
 ### Desktop app (`apps/desktop`)
 
@@ -284,9 +313,9 @@ functions exist and are tested, but no API route uses them yet.
     `store/legacy-settings.ts` migrates older saved settings automatically.
   - `apiClient.ts`: `get` (15 s timeout) and four fixed writes, `createOnboarding`, `retryOnboarding`,
     `setChecklistItem` and `setChecklistClosed` (30 s timeout; the paths are built here from validated
-    UUIDs and the input is validated with the shared schemas). `get` only accepts six fixed paths
-    (`/employees`, `/employees/<uuid>`, `/templates`, `/onboarding/options`, `/checklists`,
-    `/checklists/<uuid>`). The bearer token is added here. One retry after a 401 with a fresh token, never
+    UUIDs and the input is validated with the shared schemas). `get` only accepts seven fixed paths
+    (`/employees`, `/employees/filter-options`, `/employees/<uuid>`, `/templates`, `/onboarding/options`,
+    `/checklists`, `/checklists/<uuid>`). The bearer token is added here. One retry after a 401 with a fresh token, never
     after a network error or timeout (a write may already have been applied). `redirect: 'error'`, friendly
     errors that never contain the token. API errors carry their `code`, and `207` counts as a success
     with a body.
@@ -294,19 +323,36 @@ functions exist and are tested, but no API route uses them yet.
     scripts and styles from `self`, `connect-src 'none'`), path-traversal-safe file resolver.
   - `index.ts`, `window.ts`, `ipc.ts`: Electron wiring: single instance lock, sandbox, `app://` protocol
     handler that adds the CSP header, dev-server CSP, permission denial (only clipboard write is
-    allowed, for the app's own page), trusted-sender checks on IPC.
+    allowed, for the app's own page), trusted-sender checks on IPC. The window has spellcheck off
+    (usernames and emails are not prose) and no File / Edit / View / Window menu bar on Windows and Linux
+    (`removeMenu()`); on macOS the application menu stays, because copy and paste need its Edit menu.
+    The renderer build is minified (`minify: 'esbuild'`, `cssMinify`), because script parsing is most of
+    the start-up cost on a slow CPU.
 - **Preload** exposes `window.accessdesk` with `settings`, `auth` and `api`: `api.get`, the two onboarding
   writes (`api.onboarding.create`, `api.onboarding.retry`) and the two checklist writes
   (`api.checklists.setItem`, `api.checklists.setClosed`). `ipc-contract.test.ts` checks every channel has a
   handler and a preload function.
 - **Renderer.** Hash routes: `/setup` (first-run wizard), `/login`, `/no-access`, and under the app
-  layout `/employees`, `/onboard`, `/onboard/checklists`, `/onboard/checklists/:subjectId`, `/offboard`,
+  layout `/employees`, `/employees/:id`, `/onboard`, `/onboard/checklists`, `/onboard/checklists/:subjectId`, `/offboard`,
   `/access-review`, `/audit-log`, `/settings`. The checklist screens use the existing `onboard` feature.
   Employees, Onboard (with its checklist screens) and Settings do real work, the rest are placeholders.
-  Employees has debounced search, a Status control, group and role filters (a group and a role cannot be
-  combined, so choosing one switches the other off) with removable chips for what is applied,
-  pagination, loading, empty and error states, and an "Onboard employee" button; it retries only
-  network and 5xx errors; its query (`lib/employees-api.ts`) is reused by the manager picker. The settings form
+  The screens inside the signed-in shell are lazy-loaded (`router.tsx`), so the sign-in path does not pay
+  for the onboarding form (react-hook-form and zod); `AppLayout` owns the Suspense boundary. Each
+  screen is wrapped in `PageTransition`, a short fade between screens (React `ViewTransition`, keyed on
+  the pathname, `default="none"` so a background refetch does not animate), off when the OS "reduce
+  motion" setting is on. The hook `useReauthOn401` (`hooks/use-reauth-on-401.ts`) refetches the auth
+  status when a screen gets a 401, so the shell sends the admin back to sign in instead of the screen
+  showing a generic error.
+  Employees has one toolbar: debounced search (300 ms), a Status segmented control (All, Active,
+  Disabled), and Group and Role menus. A group and a role cannot be combined, so while one is chosen
+  the other menu is disabled and says why ("Not available with a role"). The search, filters and page
+  number live in the URL, so coming back from another screen restores them, and any change goes back
+  to the first page. Applied filters show as removable chips. The header shows how many
+  people there are and has an "Onboard employee" button. The table has three columns (Name with the
+  username under it, which links to the employee detail screen; Email; Status). Pagination is 20 a page and says "at least N" with a notice when a
+  group or role list hit the member cap. There are loading, empty and error states. The filter menus
+  come from `GET /employees/filter-options`. The screen retries only network and 5xx errors. Its query
+  (`lib/employees-api.ts`) is reused by the manager picker. The settings form
   (Issuer URL, Client ID, AccessDesk API URL; no realm field) is validated with Zod and has a "Test
   connection" button, and the settings page card is titled "Identity provider connection". The login
   button says "Sign in". API responses are validated against the shared schemas, and a bad shape becomes
@@ -316,9 +362,11 @@ functions exist and are tested, but no API route uses them yet.
   state layers, and icons drawn without a background. A Light, Dark or System theme
   (`lib/theme.ts`, saved in `localStorage`, the `.dark` class on `<html>`), a sidebar that collapses
   (automatically on narrow windows, or by hand with its header button or `Ctrl+B`, remembered in
-  `localStorage`; collapsed icons get Radix tooltips, never `title`), toast messages (`lib/toast.ts`, errors stay until
-  dismissed), loading skeletons, inline alerts, and forms that show an error summary linking to each
-  invalid field. Colours come only from semantic tokens in `styles.css`.
+  `localStorage`; collapsed icons, the theme button and Sign out get Radix tooltips from
+  `components/ui/tooltip.tsx`, never `title`), segmented buttons (Status, theme), a search bar, toast
+  messages (`lib/toast.ts`, errors stay until dismissed), loading skeletons, inline alerts, and forms
+  that show an error summary linking to each invalid field. Colours come only from semantic tokens in
+  `styles.css`.
 - **Onboard screen.** A form (first name, last name, email, username, an optional template, department,
   role, an optional manager and an optional start date) that loads its options from
   `GET /onboarding/options` and the templates from `GET /templates`. Choosing a template fills in the
@@ -327,18 +375,41 @@ functions exist and are tested, but no API route uses them yet.
   The role options use the same shared rule (`roleViolation`). The form has three cards in task order
   (template, who they are, where they work), validates a field when it is left, and suggests the
   username as `first.last` (`lib/username.ts`) until the admin types one. The manager is chosen with a
-  search and one click on a person; the chosen person is shown with a Remove button, which is the undo.
-  A disabled account is listed but cannot be chosen. The start date field always says: "Information
-  only. The account is created and enabled now. It does not unlock on this date." A complete result
-  shows the one-time temporary password with Copy and "Copy sign-in details" buttons and a reminder
-  that it is shown once, then the checklist (native checkboxes, polite announcements; a checklist with
-  no tasks offers "Mark as done"), and the steps, closed unless one did not finish. A partial result
-  opens the steps and offers Retry. Both offer "View in Employees". The password lives only in component state and is cleared when the
-  admin leaves the page. If the response to a create is lost, the screen tells the admin to check the
+  search and one click on a person (the list shows avatars and a "Disabled" badge); the chosen person is
+  shown with a Remove button, which is the undo. A disabled account is listed but cannot be chosen.
+  The "Where they work" card ends with a note that says which tasks the checklist will start with: the
+  chosen template's, or General onboarding's ("From General onboarding, the default tasks for every new
+  employee.") when no template is chosen or the template has no manual tasks. If the templates could not
+  be loaded it says a checklist is created without naming tasks. The template dropdown never lists the
+  default template, and is absent when only the default exists. Beside the form on wide windows, a live summary of what will be created, a "What happens next" list
+  and the "Onboard employee" and "Clear form" buttons stay in view while the form scrolls; on windows
+  narrower than 1280px the buttons float at the bottom and say how many required fields are left. The
+  start date field always says: "Information only. The account is created and enabled now. It does not
+  unlock on this date." A complete result shows the one-time temporary password with Copy and "Copy
+  sign-in details" buttons and a reminder that it is shown once, then the checklist (native checkboxes,
+  polite announcements; a checklist with no tasks, which needs a missing default template, offers "Mark
+  as done"), and the steps, closed unless
+  one did not finish. A partial result opens the steps and offers Retry. Both offer "View in
+  Employees". The password lives only in component state and is cleared when the admin leaves the page. If the response to a create is lost, the screen tells the admin to check the
   Employees list.
+- **Employee detail screen (read only).** `/employees/:id`, guarded by the same `employees` feature as
+  the list, lazy-loaded, from `GET /employees/:id`. The heading is the person's name (the username if
+  there is no name) and takes focus on arrival. Cards: Profile (name, username, email with a Verified
+  or Not verified label, Active or Disabled, account created), Groups (full paths, or "Not in any
+  group.") and Roles (name and description, or "No roles assigned directly."). The Groups and Roles
+  cards say that only direct memberships are shown, and that roles coming through a group or another
+  role, and the provider's own roles, are not. Nothing on the screen changes the person: its only
+  control is an "All employees" link. The list passes its search, filters and page to the detail
+  screen in the link's router state (`listSearch`), so "All employees" returns to the same list; a
+  person who opens the address directly goes to the plain list. An address that is not a UUID, or a
+  person the provider does not know (404), shows "Employee not found" (a bad address never reaches the
+  API). Other failures show the message and "Try again", and a 401 sends the admin back to sign in
+  (`useReauthOn401`). `EmployeeStatusBadge` is shared with the list.
 - **Checklist screens.** `/onboard/checklists` has an Open/Done radio filter, a table of 20 per page with
-  the employee, manager, start date and progress, and links to the detail screen.
-  `/onboard/checklists/:subjectId` shows the person, the manager, the start date and the tasks. A name that
+  the employee, the template the tasks came from ("Tasks from"), manager, start date and progress, and
+  links to the detail screen.
+  `/onboard/checklists/:subjectId` shows the person, "Tasks from <template>", the manager, the start date
+  and the tasks. A name that
   cannot be looked up shows as unknown. The page heading takes focus on arrival, controls are native and
   at least 40px, and after a failed save the list is loaded again, because a request that timed out may
   still have been applied.
@@ -377,9 +448,11 @@ lint-staged, pre-push runs typecheck and tests.
   e2e test starts a mock identity provider (discovery, JWKS, PKCE-verifying token endpoint, a few admin
   endpoints including the role list and one user), the **real built API** and the **real built Electron
   app**, and drives it with Playwright (including the no-access scenario, session restore after restart,
-  CSP enforcement, the onboarding scenario, and with a database the retry, template and checklist, and
-  manager and start date scenarios). `pnpm test:e2e` rebuilds the API and the app each time. Without
-  `TEST_DATABASE_URL` the database scenarios are skipped; with it, `e2e/run.mjs` creates a throwaway
+  CSP enforcement, the onboarding scenario, and with a database the retry, template and checklist,
+  manager and start date, and no-optional-field scenarios). `pnpm test:e2e` rebuilds the API and the app
+  each time. Without `TEST_DATABASE_URL` the database scenarios are skipped, and the first onboarding
+  ends partial (the account exists, only the checklist step fails, Retry is offered), because every
+  onboarding creates a checklist; with it, `e2e/run.mjs` creates a throwaway
   `accessdesk_e2e_<hex>` database, migrates it, seeds the templates, runs the test and drops it. It never
   touches the development database.
 - **Coverage thresholds** are a floor in each `vitest.config.ts` (95% lines, statements and functions
@@ -423,19 +496,33 @@ lint-staged, pre-push runs typecheck and tests.
   writes a PL/pgSQL body can corrupt it. Write such files directly.
 - **Playwright and live regions.** `locator.check()` expects the box to flip at once, but the app only
   changes it after the server accepts, so click and wait. `getByText` matches substrings, so a visible
-  "1 of 2 tasks done" also matches its screen-reader announcement; use `exact: true`.
+  "1 of 2 tasks done" also matches its screen-reader announcement; use `exact: true`. `exact` compares the
+  whole text of an element, so a `<summary>` with a counter in a child span is found with
+  `locator('summary').filter({ hasText })`, and `getByText('Failed')` also matches "...step failed".
 
 ## Known gaps and open questions
 
-- Onboarding part 2 is built (templates, checklists, manager, start date). Not built: bulk import (CSV),
+- Onboarding part 2 is built (templates, checklists, manager, start date). Every onboarding now creates
+  a checklist, from the chosen template's tasks or from General onboarding's. Not built: bulk import (CSV),
   email, and a template editor (templates are applied, but created and edited only in the database or the
-  seed). Offboard, Access Review and Audit Log screens, and employee detail and edit screens, are not
-  built. Only the onboarding and checklist routes use the identity provider's write functions.
-- Onboarding part 1 (create, department, role, retry, one-time password) and the role rule were checked
-  on a real instance of the first supported identity provider on 9 October 2026. Templates,
-  checklists, the manager and the start date have not been checked on a real one yet; so far they are
-  tested against fakes only (an in-memory provider, a fake admin API and a mock identity provider in the
-  e2e test). See ADR 0010 and 0011. The checks to run are listed in `docs/keycloak-setup.md`.
+  seed). Offboard, Access Review and Audit Log screens, and the employee edit screen, are not built.
+  The employee detail screen is built but read only. Only the onboarding and checklist routes use the identity provider's write functions.
+- Only the role rule (ADR 0011) and the loopback redirect were checked on a real instance of the first
+  supported identity provider, on 9 October 2026. Everything else in onboarding part 1 is still
+  unchecked there: Retry running only the missing step, the signed-in admin's ID in the provider's
+  admin events, the duplicate username message and the forced password change at first sign-in. Part 2
+  (templates, checklists, the manager and the start date) is unchecked too. All of it is tested
+  against fakes only (an in-memory provider, a fake admin API and a mock identity provider in the e2e
+  test). See ADR 0010 and 0011. The checks to run are listed in `docs/keycloak-setup.md`.
+- **The Employees group and role filters are narrow.** They cover direct members only: a person who is
+  only in a subgroup of the chosen group is not listed, and a person who holds the role only through a
+  group or a composite role is not listed either. They also stop at the 2000-member cap
+  (`DEFAULT_MEMBER_FILTER_CAP`): past it the list and the count are partial, `capped` is true and the
+  screen shows a warning. The screen says the first two in plain words ("Direct members only; people
+  in subgroups are not included." and "Only people who hold this role directly are shown."). Search and
+  the Status filter on their own are not affected: the provider does those. The employee detail screen
+  has the same limit for roles: it lists the roles a person holds directly. The group and role
+  filters are checked against fakes only; the real-provider checks are in Phase 0.
 - **Scheduled actions (pg-boss):** a job that runs later has no logged-in admin token to forward.
   Decide between stored offline tokens and running the action when an admin next opens the app, before
   building them (ADR 0003, `apps/api/src/infra/jobs.ts`). This is why the start date is only
@@ -447,22 +534,33 @@ lint-staged, pre-push runs typecheck and tests.
 
 ## Current status
 
-- Built: login, the employee list, onboarding part 1 and part 2 (templates, checklists, manager, start
-  date) and the checklist screens.
-- Checked on a real identity provider (9 October 2026): onboarding part 1, the role rule and the loopback
-  redirect. Everything else is tested against fakes only.
-- Placeholders: Offboard, Access Review, Audit Log, and employee detail and edit.
+- Built: login, the employee list with search, a Status filter and group and role filters (direct
+  members only, with a 2000-member cap; see Known gaps), onboarding part 1 and part 2 (templates,
+  checklists, manager, start date) and the checklist screens. The desktop app has the Material Design
+  3 look (Roboto Flex, light, dark and system themes, a collapsible sidebar with tooltips, screen
+  fades and lazy-loaded screens).
+- Checked on a real identity provider (9 October 2026): the role rule and the loopback redirect only.
+  Everything else, the Employees filters included, is tested against fakes only.
+- Also built: the read-only employee detail screen (profile, direct groups, direct roles), opened from
+  the Employees list.
+- Placeholders: Offboard, Access Review, Audit Log. Not built: employee edit.
 
 ## Next work
 
 In this order:
 
-1. **Phase 0 checks:** run the remaining real-provider checks in `docs/keycloak-setup.md` for templates,
-   checklists, the manager and the start date, and fix what they find.
+1. **Phase 0 checks:** run the real-provider checks in `docs/keycloak-setup.md` and fix what they find.
+   For onboarding part 1: Retry runs only the missing step, the admin events carry the signed-in
+   admin's ID, a duplicate username is refused with a clear message, and a new user must change the
+   temporary password at first sign-in. For part 2: templates, checklists, the manager and the start
+   date. For the Employees filters: Status together with a search returns only matching people with that
+   status (and the count agrees), a person who is only in a subgroup is absent from the group filter,
+   and a person who holds the role only through a group is absent from the role filter.
 2. **Offboarding** (ADR 0012, to be written before building).
 3. **Audit log** screen.
-4. **Employee detail and edit.**
-5. **Template editor**, so templates no longer have to be changed in the database or the seed.
+4. **Employee edit** (the read-only detail screen is built).
+5. **Template editor**, so templates no longer have to be changed in the database or the seed. It must
+   not archive or delete the default template, and must not allow group or role items on it (ADR 0011).
 
 ## Working style
 

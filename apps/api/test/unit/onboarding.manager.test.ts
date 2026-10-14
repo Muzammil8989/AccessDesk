@@ -9,7 +9,26 @@ import { InMemoryAuditRepository } from '../helpers/in-memory-audit';
 import { InMemoryChecklistRepository } from '../helpers/in-memory-checklists';
 
 const TEMPLATE_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e01';
+const GENERAL_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e99';
 const NOW = new Date('2026-10-09T10:00:00.000Z');
+
+const general: Template = {
+  id: GENERAL_ID,
+  name: 'General onboarding',
+  description: null,
+  departmentRef: null,
+  defaultRole: null,
+  isDefault: true,
+  items: ['Hand over laptop', 'Create email account'].map((title, position) => ({
+    id: `g${position}`,
+    title,
+    description: null,
+    kind: 'MANUAL_TASK' as const,
+    targetRef: null,
+    position,
+  })),
+};
+const generalTasks = general.items.map(({ title }) => ({ title }));
 
 const developer: Template = {
   id: TEMPLATE_ID,
@@ -17,6 +36,7 @@ const developer: Template = {
   description: null,
   departmentRef: '/Engineering',
   defaultRole: 'member',
+  isDefault: false,
   items: [
     {
       id: 'i1',
@@ -35,11 +55,14 @@ async function setup(wrap?: (provider: IdentityProvider) => IdentityProvider) {
   for (const role of ['member', 'manager', 'admin']) fake.seedRole(role);
   const managerId = await fake.provider.createUser({ username: 'boss', email: 'boss@example.com' });
   const audit = new InMemoryAuditRepository(() => NOW);
-  const checklists = new InMemoryChecklistRepository(audit);
+  const checklists = new InMemoryChecklistRepository(audit, {
+    [TEMPLATE_ID]: 'Developer',
+    [GENERAL_ID]: 'General onboarding',
+  });
   const service = new OnboardingService({
     identity: wrap ? wrap(fake.provider) : fake.provider,
     audit,
-    templates: fakeTemplateRepository([developer]),
+    templates: fakeTemplateRepository([developer, general]),
     checklists,
     clock: () => NOW,
     generatePassword: () => 'Pw-Secret-1234567',
@@ -71,7 +94,7 @@ async function setup(wrap?: (provider: IdentityProvider) => IdentityProvider) {
 const names = (steps: { name: string }[]) => steps.map((step) => step.name);
 
 describe('the checklist step for a manager or a start date', () => {
-  it('creates an open checklist for a manager alone, with no template and no tasks', async () => {
+  it('creates an open checklist for a manager alone, with the default tasks', async () => {
     const s = await setup();
 
     const result = await s.service.onboard(
@@ -89,12 +112,12 @@ describe('the checklist step for a manager or a start date', () => {
     expect(s.checklists.rows).toHaveLength(1);
     expect(s.checklists.rows[0]).toMatchObject({
       subjectId: result.subjectId,
-      templateId: null,
+      templateId: GENERAL_ID,
       managerSubjectId: s.managerId,
       startDate: null,
       status: 'open',
       completedAt: null,
-      items: [],
+      items: generalTasks,
     });
   });
 
@@ -108,7 +131,7 @@ describe('the checklist step for a manager or a start date', () => {
       managerSubjectId: null,
       startDate: '2026-10-20',
       status: 'open',
-      items: [],
+      items: generalTasks,
     });
   });
 
@@ -144,13 +167,19 @@ describe('the checklist step for a manager or a start date', () => {
     });
   });
 
-  it('adds no step and creates no checklist when there is nothing to put in one', async () => {
+  it('creates a checklist with the default tasks even with no manager, no start date and no template', async () => {
     const s = await setup();
 
     const result = await s.service.onboard(s.input, s.caller());
 
-    expect(names(result.steps)).not.toContain('create_checklist');
-    expect(s.checklists.rows).toEqual([]);
+    expect(names(result.steps)).toContain('create_checklist');
+    expect(s.checklists.rows).toHaveLength(1);
+    expect(s.checklists.rows[0]).toMatchObject({
+      templateId: GENERAL_ID,
+      managerSubjectId: null,
+      startDate: null,
+      items: generalTasks,
+    });
   });
 
   it('writes one audit row with the subject ids and the date, and nothing personal', async () => {
@@ -165,7 +194,12 @@ describe('the checklist step for a manager or a start date', () => {
     expect(row).toMatchObject({
       outcome: 'SUCCESS',
       targetSubjectId: result.subjectId,
-      details: { taskCount: '0', managerSubjectId: s.managerId, startDate: '2026-10-20' },
+      details: {
+        taskCount: '2',
+        templateId: GENERAL_ID,
+        managerSubjectId: s.managerId,
+        startDate: '2026-10-20',
+      },
     });
     const stored = JSON.stringify([s.audit.rows, s.checklists.rows]);
     for (const personal of ['Ann', 'Lee', 'ann@example.com', 'ann.lee', 'boss', 'Pw-Secret']) {

@@ -180,6 +180,63 @@ function TemplatePreview({ template }: { template: Template }) {
   );
 }
 
+interface ChecklistSource {
+  name: string;
+  /** True when the tasks come from the default template, not from the chosen one. */
+  isDefault: boolean;
+  tasks: string[];
+}
+
+/**
+ * The tasks the new employee's checklist will start with: the chosen template's own manual tasks,
+ * or, when it has none (or none is chosen), the default template's. Mirrors the API, which
+ * decides; null while the templates are not known.
+ */
+function checklistSource(
+  chosen: Template | undefined,
+  fallback: Template | undefined,
+): ChecklistSource | null {
+  const manualTasks = (template: Template | undefined) =>
+    template?.items.filter((item) => item.kind === 'MANUAL_TASK').map((item) => item.title) ?? [];
+  const own = manualTasks(chosen);
+  if (chosen && own.length > 0) return { name: chosen.name, isDefault: false, tasks: own };
+  const general = manualTasks(fallback);
+  if (fallback && general.length > 0)
+    return { name: fallback.name, isDefault: true, tasks: general };
+  return null;
+}
+
+function ChecklistNote({ source }: { source: ChecklistSource | null }) {
+  const headingId = 'checklist-note-title';
+  if (!source) {
+    return (
+      <p className="text-body-small text-on-surface-variant">
+        Every new employee gets an onboarding checklist. Its tasks could not be shown here.
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-md bg-info-container p-4 text-body-medium text-on-info-container">
+      <p id={headingId} className="text-title-small">
+        Their checklist will start with these tasks
+      </p>
+      <p className="mt-1 text-body-small">
+        {source.isDefault
+          ? `From ${source.name}, the default tasks for every new employee.`
+          : `From the ${source.name} template.`}
+      </p>
+      <ul aria-labelledby={headingId} className="mt-2 flex flex-col gap-1.5">
+        {source.tasks.map((task, index) => (
+          <li key={`${index}-${task}`} className="flex items-start gap-2">
+            <ListChecks className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 break-words">{task}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function SummaryRow({ label, value }: { label: string; value: string | undefined }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-2">
@@ -217,8 +274,10 @@ function OnboardSummary({
   const template = templates.find((item) => item.id === values.templateId);
   const role = values.role ? ROLE_LABELS[values.role] : undefined;
   const extraSteps = template?.items.filter((item) => item.kind !== 'MANUAL_TASK').length ?? 0;
-  const tasks = template?.items.filter((item) => item.kind === 'MANUAL_TASK').length ?? 0;
-  const checklist = tasks > 0 || Boolean(manager) || Boolean(values.startDate);
+  const tasks = checklistSource(
+    template,
+    templates.find((item) => item.isDefault),
+  )?.tasks.length;
 
   const next = [
     'Create the account and enable it now',
@@ -226,13 +285,9 @@ function OnboardSummary({
     ...(extraSteps > 0
       ? [`Apply ${extraSteps} more ${extraSteps === 1 ? 'group or role' : 'groups and roles'}`]
       : []),
-    ...(checklist
-      ? [
-          tasks > 0
-            ? `Create a checklist with ${tasks} ${tasks === 1 ? 'task' : 'tasks'}`
-            : 'Create a checklist',
-        ]
-      : []),
+    tasks
+      ? `Create a checklist with ${tasks} ${tasks === 1 ? 'task' : 'tasks'}`
+      : 'Create an onboarding checklist',
     'Show a one-time temporary password to hand over',
   ];
 
@@ -382,14 +437,17 @@ export function OnboardForm({
     [options.roles, canAssignAdmin],
   );
   const blocked = roles.find((role) => role.disabled);
+  // The default template is the automatic fallback for "no template", so it is not a choice.
+  const pickable = useMemo(() => templates.filter((template) => !template.isDefault), [templates]);
+  const defaultTemplate = templates.find((template) => template.isDefault);
   const selectedTemplateId = useWatch({ control: form.control, name: 'templateId' });
-  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
-  const unavailable = templates.flatMap((template) => {
+  const selectedTemplate = pickable.find((template) => template.id === selectedTemplateId);
+  const unavailable = pickable.flatMap((template) => {
     const reason = templateBlockedReason(template);
     return reason ? [{ template, reason }] : [];
   });
   const unavailableIds = new Set(unavailable.map(({ template }) => template.id));
-  const showTemplates = templatesState !== 'ready' || templates.length > 0;
+  const showTemplates = templatesState !== 'ready' || pickable.length > 0;
 
   let templateHint: string | undefined;
   if (templatesState === 'loading') templateHint = 'Loading templates…';
@@ -402,7 +460,7 @@ export function OnboardForm({
   }
 
   function applyTemplate(templateId: string) {
-    const template = templates.find((candidate) => candidate.id === templateId);
+    const template = pickable.find((candidate) => candidate.id === templateId);
     if (!template) {
       setPrefillNote(null);
       return;
@@ -538,7 +596,7 @@ export function OnboardForm({
                 })}
               >
                 <option value="">No template</option>
-                {templates.map((template) => (
+                {pickable.map((template) => (
                   <option
                     key={template.id}
                     value={template.id}
@@ -602,7 +660,7 @@ export function OnboardForm({
         <Section
           icon={Building2}
           title="Where they work"
-          description="Department and role are required. The manager and start date are optional and are saved on the onboarding checklist."
+          description="Department and role are required. The manager and start date are optional and are saved on the onboarding checklist for information."
         >
           <div className="grid gap-5 sm:grid-cols-2">
             <SelectField
@@ -646,6 +704,11 @@ export function OnboardForm({
             {...form.register('startDate', {
               setValueAs: (value: string) => (value ? value : undefined),
             })}
+          />
+          <ChecklistNote
+            source={
+              templatesState === 'ready' ? checklistSource(selectedTemplate, defaultTemplate) : null
+            }
           />
         </Section>
       </div>

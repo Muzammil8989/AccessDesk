@@ -26,6 +26,7 @@ describe('templateSchema', () => {
     description: null,
     departmentRef: '/Engineering',
     defaultRole: 'member',
+    isDefault: false,
     items: [
       item('GROUP_MEMBERSHIP', '/Sales'),
       item('ROLE', 'developer'),
@@ -43,6 +44,11 @@ describe('templateSchema', () => {
     { items: [{ ...item('ROLE', 'x'), kind: 'REALM_ROLE' }] },
   ])('rejects %j', (override) => {
     expect(templateSchema.safeParse({ ...valid, ...override }).success).toBe(false);
+  });
+
+  it('accepts the default template and requires the flag to be stated', () => {
+    expect(templateSchema.safeParse({ ...valid, isDefault: true }).success).toBe(true);
+    expect(templateSchema.safeParse({ ...valid, isDefault: undefined }).success).toBe(false);
   });
 });
 

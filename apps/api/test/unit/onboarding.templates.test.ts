@@ -1,6 +1,6 @@
 import { IdentityProviderError, type IdentityProvider } from '@accessdesk/identity';
 import { createInMemoryIdentityProvider } from '@accessdesk/identity/testing';
-import type { OnboardEmployee, Template } from '@accessdesk/shared';
+import { templateViolation, type OnboardEmployee, type Template } from '@accessdesk/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../src/errors';
 import { OnboardingService, type Caller } from '../../src/modules/onboarding/onboarding.service';
@@ -9,6 +9,13 @@ import { InMemoryAuditRepository } from '../helpers/in-memory-audit';
 import { InMemoryChecklistRepository } from '../helpers/in-memory-checklists';
 
 const TEMPLATE_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e01';
+const GENERAL_ID = '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e99';
+const GENERAL_TASKS = [
+  'Hand over laptop',
+  'Create email account',
+  'Hand over access card',
+  'Introduce to the team and manager',
+];
 const PASSWORD = 'Pw-Secret-1234567';
 const NOW = new Date('2026-10-09T10:00:00.000Z');
 
@@ -34,6 +41,7 @@ function template(items: Item[], overrides: Partial<Template> = {}): Template {
     description: null,
     departmentRef: '/Engineering',
     defaultRole: 'member',
+    isDefault: false,
     items,
     ...overrides,
   };
@@ -57,8 +65,24 @@ function failOnCall(
   };
 }
 
+/** The seeded default: manual tasks only, no department, no role, no group or role items. */
+function generalOnboarding(): Template {
+  return template(
+    GENERAL_TASKS.map((title) => item('MANUAL_TASK', null, title)),
+    {
+      id: GENERAL_ID,
+      name: 'General onboarding',
+      departmentRef: null,
+      defaultRole: null,
+      isDefault: true,
+    },
+  );
+}
+
 interface SetupOptions {
   template?: Template;
+  /** The default template in the store. Omitted: the seeded one. null: there is none. */
+  defaultTemplate?: Template | null;
   wrap?: (provider: IdentityProvider) => IdentityProvider;
   adminRoles?: string[];
   superAdminRole?: string;
@@ -76,8 +100,20 @@ function setup(options: SetupOptions = {}) {
   for (const role of options.seed?.roles ?? []) fake.seedRole(role);
 
   const audit = new InMemoryAuditRepository(() => NOW);
-  const templates = fakeTemplateRepository(options.template ? [options.template] : []);
-  const checklists = new InMemoryChecklistRepository(audit, { [TEMPLATE_ID]: 'Developer' });
+  const defaultTemplate =
+    options.defaultTemplate === undefined ? generalOnboarding() : options.defaultTemplate;
+  const templates = fakeTemplateRepository([
+    ...(options.template ? [options.template] : []),
+    ...(defaultTemplate ? [defaultTemplate] : []),
+  ]);
+  const checklists = new InMemoryChecklistRepository(audit, {
+    [TEMPLATE_ID]: 'Developer',
+    [GENERAL_ID]: 'General onboarding',
+  });
+  const policy = {
+    adminRoles: options.adminRoles ?? ['super-admin', 'hr-admin'],
+    superAdminRole: options.superAdminRole ?? 'super-admin',
+  };
   const service = new OnboardingService({
     identity: options.wrap ? options.wrap(fake.provider) : fake.provider,
     audit,
@@ -85,8 +121,7 @@ function setup(options: SetupOptions = {}) {
     checklists,
     clock: () => NOW,
     generatePassword: () => PASSWORD,
-    adminRoles: options.adminRoles ?? ['super-admin', 'hr-admin'],
-    superAdminRole: options.superAdminRole ?? 'super-admin',
+    ...policy,
   });
   const input: OnboardEmployee = {
     firstName: 'Ann',
@@ -97,13 +132,28 @@ function setup(options: SetupOptions = {}) {
     role: 'member',
     templateId: TEMPLATE_ID,
   };
+  const log = { warn: vi.fn(), error: vi.fn() };
   const caller = (roles: string[] = ['hr-admin'], actorId = 'admin-1'): Caller => ({
     actorId,
     roles,
     requestId: 'req-1',
-    log: { warn: vi.fn(), error: vi.fn() },
+    log,
   });
-  return { fake, audit, checklists, service, input, caller, engineeringId, salesId };
+  const defaultLookups = () => vi.mocked(templates.findDefault).mock.calls.length;
+  return {
+    fake,
+    audit,
+    checklists,
+    service,
+    input,
+    caller,
+    log,
+    policy,
+    templates,
+    defaultLookups,
+    engineeringId,
+    salesId,
+  };
 }
 
 const statuses = (steps: { name: string; status: string }[]) =>
@@ -199,6 +249,7 @@ describe('applying a template', () => {
       'assign_role:done',
       'template_add_to_group:done',
       'template_assign_role:done',
+      'create_checklist:done',
     ]);
     expect(s.fake.callCount('addUserToGroup')).toBe(2);
     expect(s.fake.callCount('addUserRoles')).toBe(2);
@@ -235,6 +286,7 @@ describe('applying a template', () => {
       'create_user:done',
       'add_to_group:done',
       'assign_role:done',
+      'create_checklist:done',
     ]);
     expect(s.fake.callCount('listRoles')).toBe(0);
   });
@@ -296,17 +348,107 @@ describe('the checklist step', () => {
     }
   });
 
-  it('adds no step and creates no checklist without a template or without manual tasks', async () => {
-    const none = setup();
-    const noTasks = setup({ template: template([item('ROLE', 'developer')]) });
+  it('starts with the General onboarding tasks when no template is chosen', async () => {
+    const s = setup();
 
-    const a = await none.service.onboard({ ...none.input, templateId: undefined }, none.caller());
-    const b = await noTasks.service.onboard(noTasks.input, noTasks.caller());
+    const result = await s.service.onboard({ ...s.input, templateId: undefined }, s.caller());
 
-    expect(a.steps.map((step) => step.name)).not.toContain('create_checklist');
-    expect(b.steps.map((step) => step.name)).not.toContain('create_checklist');
-    expect(none.checklists.rows).toEqual([]);
-    expect(noTasks.checklists.rows).toEqual([]);
+    expect(result.status).toBe('complete');
+    expect(result.steps.at(-1)).toEqual({ name: 'create_checklist', status: 'done' });
+    expect(s.checklists.rows).toHaveLength(1);
+    expect(s.checklists.rows[0]).toMatchObject({
+      subjectId: result.subjectId,
+      templateId: GENERAL_ID,
+      status: 'open',
+      completedAt: null,
+      items: GENERAL_TASKS.map((title, position) => ({ title, position, status: 'pending' })),
+    });
+  });
+
+  it('starts with the General onboarding tasks when the template has no manual tasks', async () => {
+    const s = setup({ template: template([item('ROLE', 'developer')]) });
+
+    const result = await s.service.onboard(s.input, s.caller());
+
+    expect(result.steps.at(-1)).toEqual({ name: 'create_checklist', status: 'done' });
+    expect(s.checklists.rows[0]).toMatchObject({
+      templateId: GENERAL_ID,
+      items: GENERAL_TASKS.map((title) => ({ title })),
+    });
+    // The template's own role still applies: only the task source falls back.
+    expect(s.fake.inspect(result.subjectId)?.roleNames).toEqual(['member', 'developer']);
+  });
+
+  it('starts with only the chosen template tasks, and none of the default ones, when it has some', async () => {
+    const s = setup({ template: withTasks() });
+
+    await s.service.onboard(s.input, s.caller());
+
+    expect(s.checklists.rows[0]?.templateId).toBe(TEMPLATE_ID);
+    expect(s.checklists.rows[0]?.items.map((task) => task.title)).toEqual([
+      'Order laptop',
+      'Security training',
+    ]);
+  });
+
+  it('does not read the default template when the chosen one has tasks', async () => {
+    const s = setup({ template: withTasks() });
+
+    await s.service.onboard(s.input, s.caller());
+
+    expect(s.defaultLookups()).toBe(0);
+  });
+
+  it('still creates an open, empty checklist, and warns, when no default template exists', async () => {
+    const s = setup({ defaultTemplate: null });
+
+    const result = await s.service.onboard({ ...s.input, templateId: undefined }, s.caller());
+
+    expect(result.status).toBe('complete');
+    expect(s.checklists.rows).toHaveLength(1);
+    expect(s.checklists.rows[0]).toMatchObject({ templateId: null, status: 'open', items: [] });
+    expect(s.log.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a start date as information: the tasks still come from the default', async () => {
+    const s = setup();
+
+    await s.service.onboard(
+      { ...s.input, templateId: undefined, startDate: '2026-10-20' },
+      s.caller(),
+    );
+
+    expect(s.checklists.rows[0]).toMatchObject({
+      startDate: '2026-10-20',
+      templateId: GENERAL_ID,
+      items: GENERAL_TASKS.map((title) => ({ title })),
+    });
+  });
+
+  it('writes one create_checklist audit row with ids and a count, and no password or personal data', async () => {
+    const s = setup();
+
+    const result = await s.service.onboard({ ...s.input, templateId: undefined }, s.caller());
+
+    const rows = s.audit.rows.filter((row) => row.action === 'onboarding.create_checklist');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      outcome: 'SUCCESS',
+      targetSubjectId: result.subjectId,
+      details: { templateId: GENERAL_ID, taskCount: '4' },
+    });
+    expect(s.audit.rows).toHaveLength(4);
+    const stored = JSON.stringify([s.audit.rows, s.checklists.rows]);
+    for (const secret of ['Ann', 'Lee', 'ann@example.com', 'ann.lee', PASSWORD]) {
+      expect(stored).not.toContain(secret);
+    }
+  });
+
+  it('carries no group or role item, so the role rule has nothing to refuse', () => {
+    const general = generalOnboarding();
+
+    expect(general.items.every((entry) => entry.kind === 'MANUAL_TASK')).toBe(true);
+    expect(templateViolation(general, ['hr-admin'], setup().policy)).toBeNull();
   });
 
   it('is skipped on retry once the checklist exists, and never makes a second one', async () => {
@@ -321,6 +463,70 @@ describe('the checklist step', () => {
       message: 'Already done',
     });
     expect(s.checklists.rows).toHaveLength(1);
+  });
+
+  it('does not create a second checklist on Retry after a default-template onboarding', async () => {
+    const s = setup();
+    const first = await s.service.onboard({ ...s.input, templateId: undefined }, s.caller());
+    const lookups = s.defaultLookups();
+    const { departmentGroupId, role } = s.input;
+
+    const again = await s.service.retry(first.subjectId, { departmentGroupId, role }, s.caller());
+
+    expect(again.steps.at(-1)).toEqual({
+      name: 'create_checklist',
+      status: 'skipped',
+      message: 'Already done',
+    });
+    expect(s.checklists.rows).toHaveLength(1);
+    expect(s.checklists.rows[0]?.items).toHaveLength(GENERAL_TASKS.length);
+    // A checklist that exists is not changed, so Retry does not look the default up.
+    expect(s.defaultLookups()).toBe(lookups);
+    expect(s.audit.rows.filter((row) => row.action === 'onboarding.create_checklist')).toHaveLength(
+      1,
+    );
+  });
+
+  it('keeps the account and fails only the checklist step when the default template cannot be read, and Retry finishes it', async () => {
+    const s = setup();
+    vi.mocked(s.templates.findDefault).mockRejectedValueOnce(new Error('database unavailable'));
+
+    const first = await s.service.onboard({ ...s.input, templateId: undefined }, s.caller());
+
+    expect(first.status).toBe('partial');
+    expect(first.temporaryPassword).toBe(PASSWORD);
+    expect(first.steps.at(-1)).toEqual({
+      name: 'create_checklist',
+      status: 'failed',
+      message: 'This step failed unexpectedly.',
+    });
+    expect(s.checklists.rows).toEqual([]);
+    expect(await s.fake.provider.findUsers({ username: 'ann.lee', exact: true })).toHaveLength(1);
+    const failure = s.audit.rows.find((row) => row.outcome === 'FAILURE');
+    expect(failure).toMatchObject({ action: 'onboarding.create_checklist' });
+    expect(failure?.details ?? {}).not.toHaveProperty('taskCount');
+    const { departmentGroupId, role } = s.input;
+
+    const retried = await s.service.retry(first.subjectId, { departmentGroupId, role }, s.caller());
+
+    expect(retried.status).toBe('complete');
+    expect(s.checklists.rows).toHaveLength(1);
+    expect(s.checklists.rows[0]?.items).toHaveLength(GENERAL_TASKS.length);
+  });
+
+  it('creates the checklist from the default on Retry when the first attempt could not save it', async () => {
+    const s = setup();
+    s.checklists.failCreate = true;
+    const first = await s.service.onboard({ ...s.input, templateId: undefined }, s.caller());
+    expect(first.status).toBe('partial');
+    s.checklists.failCreate = false;
+    const { departmentGroupId, role } = s.input;
+
+    const retried = await s.service.retry(first.subjectId, { departmentGroupId, role }, s.caller());
+
+    expect(retried.status).toBe('complete');
+    expect(s.checklists.rows).toHaveLength(1);
+    expect(s.checklists.rows[0]?.items).toHaveLength(GENERAL_TASKS.length);
   });
 
   it('fails as a partial result when the checklist cannot be saved, and Retry creates it', async () => {
@@ -384,6 +590,7 @@ describe('a step failing', () => {
         'assign_role:skipped',
         'template_add_to_group:skipped',
         'template_assign_role:skipped',
+        'create_checklist:skipped',
       ],
     },
     {
@@ -395,6 +602,7 @@ describe('a step failing', () => {
         'assign_role:failed',
         'template_add_to_group:skipped',
         'template_assign_role:skipped',
+        'create_checklist:skipped',
       ],
     },
     {
@@ -406,6 +614,7 @@ describe('a step failing', () => {
         'assign_role:done',
         'template_add_to_group:failed',
         'template_assign_role:skipped',
+        'create_checklist:skipped',
       ],
     },
     {
@@ -417,6 +626,7 @@ describe('a step failing', () => {
         'assign_role:done',
         'template_add_to_group:done',
         'template_assign_role:failed',
+        'create_checklist:skipped',
       ],
     },
   ])(
@@ -459,7 +669,7 @@ describe('a step failing', () => {
 
     const result = await s.service.onboard(s.input, s.caller());
 
-    expect(result.steps.at(-1)).toMatchObject({
+    expect(result.steps.find((step) => step.status === 'failed')).toMatchObject({
       name: 'template_assign_role',
       status: 'failed',
       message: 'The identity provider refused this step. Your account may be missing a permission.',
@@ -475,14 +685,14 @@ describe('retry with a template', () => {
       label: 'the template group',
       failAt: 'addUserToGroup' as const,
       callsLeft: { addUserToGroup: 2, addUserRoles: 2 },
-      retried: ['template_add_to_group:done', 'template_assign_role:done'],
+      retried: ['template_add_to_group:done', 'template_assign_role:done', 'create_checklist:done'],
       skipped: 3,
     },
     {
       label: 'the template role',
       failAt: 'addUserRoles' as const,
       callsLeft: { addUserToGroup: 2, addUserRoles: 2 },
-      retried: ['template_assign_role:done'],
+      retried: ['template_assign_role:done', 'create_checklist:done'],
       skipped: 4,
     },
   ])(
@@ -565,7 +775,7 @@ describe('names that do not exist in the identity provider', () => {
     const first = await s.service.onboard(s.input, s.caller());
 
     expect(first.status).toBe('partial');
-    expect(first.steps.at(-1)).toEqual({
+    expect(first.steps.find((step) => step.status === 'failed')).toEqual({
       name: 'template_add_to_group',
       status: 'failed',
       label: '/Nowhere',
@@ -583,6 +793,7 @@ describe('names that do not exist in the identity provider', () => {
     expect(retried.status).toBe('complete');
     expect(retried.steps.filter((step) => step.status === 'done')).toEqual([
       { name: 'template_add_to_group', status: 'done', label: '/Nowhere' },
+      { name: 'create_checklist', status: 'done' },
     ]);
     expect(s.fake.callCount('createUser')).toBe(1);
   });
@@ -592,7 +803,7 @@ describe('names that do not exist in the identity provider', () => {
 
     const result = await s.service.onboard(s.input, s.caller());
 
-    expect(result.steps.at(-1)?.message).toBe(
+    expect(result.steps.find((step) => step.status === 'failed')?.message).toBe(
       'Group "/Engineering/Backend" does not exist in the identity provider (only top-level groups are supported)',
     );
   });
@@ -603,13 +814,13 @@ describe('names that do not exist in the identity provider', () => {
     const first = await s.service.onboard(s.input, s.caller());
 
     expect(first.status).toBe('partial');
-    expect(first.steps.at(-1)).toEqual({
+    expect(first.steps.find((step) => step.status === 'failed')).toEqual({
       name: 'template_assign_role',
       status: 'failed',
       label: 'ghost',
       message: 'Role "ghost" does not exist in the identity provider',
     });
-    expect(s.audit.rows.at(-1)).toMatchObject({
+    expect(s.audit.rows.find((row) => row.outcome === 'FAILURE')).toMatchObject({
       action: 'onboarding.template_assign_role',
       outcome: 'FAILURE',
     });
@@ -638,7 +849,10 @@ describe('names that do not exist in the identity provider', () => {
 
     const result = await s.service.onboard(s.input, s.caller());
 
-    expect(result.steps.at(-1)).toMatchObject({ status: 'failed', message });
+    expect(result.steps.find((step) => step.status === 'failed')).toMatchObject({
+      status: 'failed',
+      message,
+    });
   });
 });
 

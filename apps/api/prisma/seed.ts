@@ -15,12 +15,26 @@ interface SeedItem {
 interface SeedTemplate {
   name: string;
   description: string;
-  departmentRef: string;
-  defaultRole: 'member' | 'manager' | 'admin';
+  departmentRef?: string;
+  defaultRole?: 'member' | 'manager' | 'admin';
+  isDefault?: boolean;
   items: SeedItem[];
 }
 
 const templates: SeedTemplate[] = [
+  {
+    name: 'General onboarding',
+    description:
+      'The checklist every new employee starts with when no template adds its own tasks.',
+    isDefault: true,
+    // Manual tasks only. A group or role item here would bypass the role rule (ADR 0011).
+    items: [
+      { title: 'Hand over laptop', kind: 'MANUAL_TASK' },
+      { title: 'Create email account', kind: 'MANUAL_TASK' },
+      { title: 'Hand over access card', kind: 'MANUAL_TASK' },
+      { title: 'Introduce to the team and manager', kind: 'MANUAL_TASK' },
+    ],
+  },
   {
     name: 'Developer',
     description: 'Engineering hires: source control, CI and internal tooling.',
@@ -60,36 +74,36 @@ async function main() {
   const prisma = createPrisma(url);
 
   try {
+    let created = 0;
     for (const t of templates) {
-      await prisma.$transaction(async (tx) => {
-        const template = await tx.onboardingTemplate.upsert({
-          where: { name: t.name },
-          update: {
-            description: t.description,
-            departmentRef: t.departmentRef,
-            defaultRole: t.defaultRole,
-          },
-          create: {
-            name: t.name,
-            description: t.description,
-            departmentRef: t.departmentRef,
-            defaultRole: t.defaultRole,
-          },
-        });
-        await tx.templateItem.deleteMany({ where: { templateId: template.id } });
-        await tx.templateItem.createMany({
-          data: t.items.map((item, position) => ({
-            templateId: template.id,
-            title: item.title,
-            kind: item.kind,
-            targetRef: item.targetRef ?? null,
-            description: item.description ?? null,
-            position,
-          })),
-        });
+      // Create only if missing: a template that exists, edited or not, is never touched, so
+      // running the seed again cannot undo changes made in the database.
+      const exists = await prisma.onboardingTemplate.findUnique({
+        where: { name: t.name },
+        select: { id: true },
       });
+      if (exists) continue;
+      await prisma.onboardingTemplate.create({
+        data: {
+          name: t.name,
+          description: t.description,
+          departmentRef: t.departmentRef ?? null,
+          defaultRole: t.defaultRole ?? null,
+          isDefault: t.isDefault ?? false,
+          items: {
+            create: t.items.map((item, position) => ({
+              title: item.title,
+              kind: item.kind,
+              targetRef: item.targetRef ?? null,
+              description: item.description ?? null,
+              position,
+            })),
+          },
+        },
+      });
+      created += 1;
     }
-    console.log(`Seeded ${templates.length} templates`);
+    console.log(`Seeded ${created} new templates (${templates.length - created} already existed)`);
   } finally {
     await prisma.$disconnect();
   }

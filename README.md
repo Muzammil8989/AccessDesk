@@ -134,7 +134,8 @@ Run all commands from the repository root.
 
 `pnpm test:e2e` needs a display. Set `TEST_DATABASE_URL` to a PostgreSQL server to also run the
 retry, template and checklist, and manager scenarios: the runner creates a throwaway database, seeds it
-and drops it afterwards.
+and drops it afterwards. Without one, onboarding ends partial because the checklist step needs the
+database.
 
 The full list, with the Git hooks and testing conventions, is in the
 [development guide](docs/development.md).
@@ -218,8 +219,10 @@ tree and the testing conventions are in the [development guide](docs/development
   [design system](design-system/accessdesk/MASTER.md).
 - Employees list with search, pagination, and loading, empty and error states (desktop to API to
   identity provider)
-- API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id`, and the
-  onboarding and checklist routes below
+- Employee detail (read only): the profile and the groups and roles a person holds directly, opened
+  from a name in the Employees list
+- API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id` (the
+  profile with the groups and roles held directly), and the onboarding and checklist routes below
 - Onboarding ([ADR 0010](docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md),
   [ADR 0011](docs/adr/0011-onboarding-part-2-templates-checklists-manager-start-date.md)): the Onboard
   screen and `GET /onboarding/options`, `POST /onboarding` and `POST /onboarding/:subjectId/retry`. It
@@ -230,8 +233,10 @@ tree and the testing conventions are in the [development guide](docs/development
     manual tasks. One shared rule decides which roles may be assigned (`owner` and the super-admin role
     never; `admin` and the `AUTH_ADMIN_ROLES` roles only for a super-admin), for the form and for
     templates. A group or role that does not exist fails only its own step and can be retried.
-  - **Checklists.** `GET /checklists` (Open or Done, 20 per page), `GET /checklists/:subjectId` and two
-    `PATCH` routes to tick a task and to close one that has no tasks. A tick and its audit row are one
+  - **Checklists.** Every onboarding creates one, with the chosen template's manual tasks or, without
+    them, the tasks of the default template (General onboarding). `GET /checklists` (Open or Done, 20 per
+    page), `GET /checklists/:subjectId` and two `PATCH` routes to tick a task and to close one that has no
+    tasks. A tick and its audit row are one
     transaction. They are never created as done. Names are looked up live; only the `subjectId` is saved.
   - **Manager and start date.** The manager is picked with the Employees search and checked before
     anything is created. The start date is **information only**: the account is enabled at once.
@@ -246,7 +251,7 @@ tree and the testing conventions are in the [development guide](docs/development
 - Offboard, Access Review and Audit Log screens (placeholders today)
 - The rest of Onboarding: bulk import (CSV), email, and a template editor (templates can be applied, but
   not yet created or edited in the app)
-- Employee detail and edit screens (the API route for one employee exists)
+- Employee edit (the detail screen is read only)
 - API routes for the identity provider's other write functions (disable, end sessions, remove groups
   and roles). The functions are implemented and tested, but no route calls them yet.
 - Identity providers other than the first one. The API depends on an interface, so one can be added

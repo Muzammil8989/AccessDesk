@@ -95,6 +95,7 @@ export const sampleTemplates: Template[] = [
     description: null,
     departmentRef: null,
     defaultRole: null,
+    isDefault: false,
     items: [
       {
         id: 'i1',
@@ -114,6 +115,7 @@ export function fakeTemplateRepository(
   return {
     listWithItems: vi.fn().mockResolvedValue(templates),
     findById: vi.fn(async (id: string) => templates.find((template) => template.id === id) ?? null),
+    findDefault: vi.fn(async () => templates.find((template) => template.isDefault) ?? null),
   };
 }
 

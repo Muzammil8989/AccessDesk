@@ -36,6 +36,7 @@ const developer = (extra: Item[] = []): Template => ({
   description: null,
   departmentRef: '/Engineering',
   defaultRole: 'member',
+  isDefault: false,
   items: [
     item('GROUP_MEMBERSHIP', '/Sales'),
     item('ROLE', 'developer'),

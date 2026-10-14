@@ -42,6 +42,8 @@ export const checklistSummarySchema = z.object({
   completedAt: z.iso.datetime().nullable(),
   totalCount: z.number().int().min(0),
   doneCount: z.number().int().min(0),
+  /** The template the tasks came from, or null. */
+  templateName: z.string().nullable(),
   person: checklistPersonSchema.nullable(),
   manager: checklistManagerSchema.nullable(),
   startDate: z.iso.date().nullable(),
