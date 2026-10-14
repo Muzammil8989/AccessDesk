@@ -50,6 +50,7 @@ const developer = {
   description: null,
   departmentRef: '/Engineering',
   defaultRole: 'manager',
+  isDefault: false,
   items: [
     item(1, 'GROUP_MEMBERSHIP', '/Sales'),
     item(2, 'ROLE', 'developer'),
@@ -62,6 +63,7 @@ const hr = {
   description: null,
   departmentRef: '/Engineering',
   defaultRole: 'member',
+  isDefault: false,
   items: [item(1, 'ROLE', 'hr-admin')],
 };
 const lost = {
@@ -70,6 +72,7 @@ const lost = {
   description: null,
   departmentRef: '/Overseas',
   defaultRole: null,
+  isDefault: false,
   items: [],
 };
 const adminDefault = {
@@ -78,7 +81,23 @@ const adminDefault = {
   description: null,
   departmentRef: '/Sales',
   defaultRole: 'admin',
+  isDefault: false,
   items: [],
+};
+const GENERAL_TASKS = [
+  'Hand over laptop',
+  'Create email account',
+  'Hand over access card',
+  'Introduce to the team and manager',
+];
+const general = {
+  id: '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e99',
+  name: 'General onboarding',
+  description: null,
+  departmentRef: null,
+  defaultRole: null,
+  isDefault: true,
+  items: GENERAL_TASKS.map((title, n) => item(n + 1, 'MANUAL_TASK', null, title)),
 };
 
 const checklist = (status: 'open' | 'done' = 'open') => ({
@@ -505,5 +524,108 @@ describe('Onboard form: sending a template', () => {
       'href',
       '/onboard/checklists',
     );
+  });
+});
+
+describe('Onboard form: the checklist it starts', () => {
+  const noteList = () =>
+    screen.getByRole('list', { name: 'Their checklist will start with these tasks' });
+  const taskTitles = () =>
+    within(noteList())
+      .getAllByRole('listitem')
+      .map((li) => li.textContent);
+
+  it('does not offer the default template in the dropdown', async () => {
+    setup({ templates: [developer, general, hr] });
+    renderWithProviders(<OnboardPage />);
+
+    const select = await templateSelect();
+
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['No template', 'Developer', 'HR']);
+  });
+
+  it('says in plain words that the checklist starts with the General onboarding tasks when no template is chosen', async () => {
+    setup({ templates: [developer, general] });
+    renderWithProviders(<OnboardPage />);
+
+    await templateSelect();
+
+    expect(taskTitles()).toEqual(GENERAL_TASKS);
+    expect(
+      screen.getByText('From General onboarding, the default tasks for every new employee.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Create a checklist with 4 tasks')).toBeInTheDocument();
+  });
+
+  it('shows only the chosen template tasks when it has its own, and none of the default ones', async () => {
+    setup({ templates: [developer, general] });
+    renderWithProviders(<OnboardPage />);
+
+    await userEvent.selectOptions(await templateSelect(), T_DEV);
+
+    expect(taskTitles()).toEqual(['Order laptop']);
+    expect(screen.getByText('From the Developer template.')).toBeInTheDocument();
+    expect(screen.getByText('Create a checklist with 1 task')).toBeInTheDocument();
+    expect(screen.queryByText('Hand over laptop')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the General onboarding tasks when the chosen template has no manual tasks', async () => {
+    setup({ templates: [hr, general] });
+    renderWithProviders(<OnboardPage />);
+
+    await userEvent.selectOptions(await templateSelect(), T_HR);
+
+    expect(taskTitles()).toEqual(GENERAL_TASKS);
+    expect(screen.getByText(/^From General onboarding/)).toBeInTheDocument();
+  });
+
+  it('goes back to the General onboarding tasks when "No template" is chosen again', async () => {
+    setup({ templates: [developer, general] });
+    renderWithProviders(<OnboardPage />);
+    const select = await templateSelect();
+    await userEvent.selectOptions(select, T_DEV);
+
+    await userEvent.selectOptions(select, '');
+
+    expect(taskTitles()).toEqual(GENERAL_TASKS);
+  });
+
+  it('still says the checklist is created when only the default template exists, with no template field', async () => {
+    setup({ templates: [general] });
+    renderWithProviders(<OnboardPage />);
+
+    await screen.findByLabelText('Department');
+
+    expect(screen.queryByLabelText('Template (optional)')).not.toBeInTheDocument();
+    expect(taskTitles()).toEqual(GENERAL_TASKS);
+  });
+
+  it('does not name tasks it does not know, but still says a checklist is created, when templates cannot be loaded', async () => {
+    setup({ templatesResponse: async () => fail(403, 'no') });
+    renderWithProviders(<OnboardPage />);
+
+    await screen.findByLabelText('Department');
+
+    expect(
+      screen.getByText(
+        'Every new employee gets an onboarding checklist. Its tasks could not be shown here.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Create an onboarding checklist')).toBeInTheDocument();
+  });
+
+  it('says the manager and start date are saved on the checklist for information', async () => {
+    setup({ templates: [general] });
+    renderWithProviders(<OnboardPage />);
+
+    await screen.findByLabelText('Department');
+
+    expect(
+      screen.getByText(/saved on the onboarding checklist for information/),
+    ).toBeInTheDocument();
   });
 });

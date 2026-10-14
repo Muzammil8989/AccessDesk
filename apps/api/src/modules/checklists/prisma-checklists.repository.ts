@@ -114,7 +114,7 @@ export class PrismaChecklistRepository implements ChecklistRepository {
         orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
         skip: query.first,
         take: query.max,
-        include: { items: { select: { status: true } } },
+        include: { template: { select: { name: true } }, items: { select: { status: true } } },
       }),
       this.prisma.employeeChecklist.count({ where }),
     ]);
@@ -127,6 +127,7 @@ export class PrismaChecklistRepository implements ChecklistRepository {
         completedAt: row.completedAt,
         totalCount: row.items.length,
         doneCount: row.items.filter((item) => item.status === 'DONE').length,
+        templateName: row.template?.name ?? null,
         managerSubjectId: row.managerSubjectId,
         startDate: dateOnly(row.startDate),
       })),

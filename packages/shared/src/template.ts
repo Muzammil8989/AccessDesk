@@ -21,6 +21,8 @@ export const templateSchema = z.object({
   description: z.string().nullable(),
   departmentRef: z.string().nullable(),
   defaultRole: z.enum(ONBOARDABLE_ROLES).nullable(),
+  /** The template whose manual tasks start a checklist when the chosen one has none. */
+  isDefault: z.boolean(),
   items: z.array(templateItemSchema),
 });
 export type Template = z.infer<typeof templateSchema>;

@@ -24,16 +24,22 @@ import {
   createUserStep,
   existingUserStep,
   requireSubject,
+  type ChecklistSource,
   type Department,
 } from './onboarding.steps';
 import { templateSteps } from './onboarding.template-steps';
 
 export const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+const manualTasks = (template: Template | null) =>
+  (template?.items ?? [])
+    .filter((item) => item.kind === 'MANUAL_TASK')
+    .map(({ title, description }) => ({ title, description }));
+
 export interface OnboardingServiceDeps {
   identity: IdentityProvider;
   audit: AuditWriter & AuditReader;
-  templates: Pick<TemplateRepository, 'findById'>;
+  templates: Pick<TemplateRepository, 'findById' | 'findDefault'>;
   checklists: Pick<ChecklistRepository, 'create' | 'exists'>;
   clock: () => Date;
   generatePassword: () => string;
@@ -164,30 +170,42 @@ export class OnboardingService {
     };
   }
 
+  /**
+   * Every onboarding has a checklist. Its tasks are the chosen template's manual tasks, or, when
+   * that template has none (or none was chosen), the default template's. The manager and start
+   * date are only information on it.
+   */
   private checklistSteps(
     template: Template | null,
     input: Pick<OnboardEmployee, 'managerSubjectId' | 'startDate'>,
-    caller: Pick<Caller, 'actorId'>,
+    caller: Pick<Caller, 'actorId' | 'log'>,
     satisfied: boolean,
   ): OnboardingStep[] {
-    const tasks = (template?.items ?? [])
-      .filter((item) => item.kind === 'MANUAL_TASK')
-      .map(({ title, description }) => ({ title, description }));
-    const managerSubjectId = input.managerSubjectId ?? null;
-    const startDate = input.startDate ?? null;
-    if (tasks.length === 0 && !managerSubjectId && !startDate) return [];
     return [
       createChecklistStep({
         checklists: this.deps.checklists,
-        templateId: template?.id ?? null,
-        tasks,
-        managerSubjectId,
-        startDate,
+        resolveSource: () => this.checklistSource(template, caller),
+        managerSubjectId: input.managerSubjectId ?? null,
+        startDate: input.startDate ?? null,
         actorId: caller.actorId,
         now: this.deps.clock,
         satisfied,
       }),
     ];
+  }
+
+  private async checklistSource(
+    template: Template | null,
+    caller: Pick<Caller, 'log'>,
+  ): Promise<ChecklistSource> {
+    const own = manualTasks(template);
+    if (template && own.length > 0) return { templateId: template.id, tasks: own };
+    const fallback = await this.deps.templates.findDefault();
+    if (!fallback) {
+      caller.log.warn('No default onboarding template exists: the checklist starts with no tasks');
+      return { templateId: template?.id ?? null, tasks: [] };
+    }
+    return { templateId: fallback.id, tasks: manualTasks(fallback) };
   }
 
   /** The manager must exist and be enabled. Checked before anything is created. */

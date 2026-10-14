@@ -60,6 +60,7 @@ export class ChecklistsService {
         completedAt: item.completedAt?.toISOString() ?? null,
         totalCount: item.totalCount,
         doneCount: item.doneCount,
+        templateName: item.templateName,
         person: people.get(item.subjectId) ?? null,
         manager: managerOf(item.managerSubjectId, people),
         startDate: item.startDate,

@@ -43,6 +43,7 @@ describe('response schemas', () => {
             description: null,
             departmentRef: '/Engineering',
             defaultRole: 'member',
+            isDefault: false,
             items: [],
           },
         ],

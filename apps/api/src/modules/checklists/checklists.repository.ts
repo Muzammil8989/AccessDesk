@@ -32,6 +32,8 @@ export interface StoredChecklistSummary {
   completedAt: Date | null;
   totalCount: number;
   doneCount: number;
+  /** The template the tasks came from. */
+  templateName: string | null;
   managerSubjectId: string | null;
   startDate: string | null;
 }
@@ -68,8 +70,9 @@ export type ClosedResult =
 
 export interface ChecklistRepository {
   /**
-   * Creates the onboarding checklist for a subject, always open, even with no tasks: it stays open
-   * until it is closed. Does nothing if one exists.
+   * Creates the onboarding checklist for a subject, always open: it stays open until its tasks are
+   * done or, with no tasks, until it is closed. Does nothing if one exists. `templateId` is the
+   * template the tasks came from.
    */
   create(checklist: NewChecklist): Promise<void>;
   exists(subjectId: string): Promise<boolean>;

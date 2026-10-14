@@ -343,6 +343,55 @@ describe.skipIf(!adminUrl)('database migrations', () => {
     });
   });
 
+  describe('template default flag', () => {
+    it('adds a non-null boolean column that defaults to false', async () => {
+      const { rows } = await db.query(
+        `SELECT data_type, is_nullable, column_default FROM information_schema.columns
+         WHERE table_name = 'onboarding_templates' AND column_name = 'is_default'`,
+      );
+      expect(rows).toEqual([{ data_type: 'boolean', is_nullable: 'NO', column_default: 'false' }]);
+    });
+
+    it('leaves every template that existed before the migration unflagged and unchanged', async () => {
+      const { rows } = await db.query(
+        `SELECT name, is_default FROM onboarding_templates WHERE name IN ('Legacy', 'Single', 'Two')
+         ORDER BY name`,
+      );
+      expect(rows).toEqual([
+        { name: 'Legacy', is_default: false },
+        { name: 'Single', is_default: false },
+        { name: 'Two', is_default: false },
+      ]);
+    });
+
+    it('does not create a template or touch a checklist', async () => {
+      const templates = await db.query(`SELECT count(*)::int AS n FROM onboarding_templates`);
+      const flagged = await db.query(
+        `SELECT count(*)::int AS n FROM onboarding_templates WHERE is_default`,
+      );
+      const legacy = await db.query(
+        `SELECT manager_subject_id, start_date, status FROM employee_checklists WHERE id = $1`,
+        [LEGACY_CHECKLIST_ID],
+      );
+      expect(templates.rows[0].n).toBe(6);
+      expect(flagged.rows[0].n).toBe(0);
+      expect(legacy.rows).toEqual([{ manager_subject_id: null, start_date: null, status: 'OPEN' }]);
+    });
+
+    it('can be applied again without an error or a change', async () => {
+      const before = await db.query(
+        `SELECT id, name, is_default FROM onboarding_templates ORDER BY name`,
+      );
+
+      await applyMigration(db, '20261014090000_template_is_default');
+
+      const after = await db.query(
+        `SELECT id, name, is_default FROM onboarding_templates ORDER BY name`,
+      );
+      expect(after.rows).toEqual(before.rows);
+    });
+  });
+
   describe('one checklist per subject and type', () => {
     it('refuses a second onboarding checklist for the same subject', async () => {
       const error = await errorOf(

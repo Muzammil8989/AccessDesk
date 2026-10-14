@@ -98,8 +98,9 @@ action, outcome from app_audit_log order by created_at desc limit 10;`) Retry ad
    Retry works after you create the role.
 8. **Privileged template.** As `hr-admin`, the HR template (or any template with `admin`) is disabled and
    the API refuses it. As `super-admin` it works.
-9. **Checklist.** Tick and untick a task, and see the audit row. A checklist with a manager and a start date
-   and no tasks stays in the Open list until you mark it as done.
+9. **Checklist.** Every onboarding creates one. With no template it starts with the four General
+   onboarding tasks; a template with its own manual tasks uses only those. Tick and untick a task, and
+   see the audit row. A checklist closes itself when its last task is ticked.
 10. **Manager.** The manager's name shows on the checklist, the start-date text says the account is not
     delayed, and a disabled manager cannot be chosen.
 

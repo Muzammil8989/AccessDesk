@@ -134,7 +134,8 @@ Run all commands from the repository root.
 
 `pnpm test:e2e` needs a display. Set `TEST_DATABASE_URL` to a PostgreSQL server to also run the
 retry, template and checklist, and manager scenarios: the runner creates a throwaway database, seeds it
-and drops it afterwards.
+and drops it afterwards. Without one, onboarding ends partial because the checklist step needs the
+database.
 
 The full list, with the Git hooks and testing conventions, is in the
 [development guide](docs/development.md).
@@ -232,8 +233,10 @@ tree and the testing conventions are in the [development guide](docs/development
     manual tasks. One shared rule decides which roles may be assigned (`owner` and the super-admin role
     never; `admin` and the `AUTH_ADMIN_ROLES` roles only for a super-admin), for the form and for
     templates. A group or role that does not exist fails only its own step and can be retried.
-  - **Checklists.** `GET /checklists` (Open or Done, 20 per page), `GET /checklists/:subjectId` and two
-    `PATCH` routes to tick a task and to close one that has no tasks. A tick and its audit row are one
+  - **Checklists.** Every onboarding creates one, with the chosen template's manual tasks or, without
+    them, the tasks of the default template (General onboarding). `GET /checklists` (Open or Done, 20 per
+    page), `GET /checklists/:subjectId` and two `PATCH` routes to tick a task and to close one that has no
+    tasks. A tick and its audit row are one
     transaction. They are never created as done. Names are looked up live; only the `subjectId` is saved.
   - **Manager and start date.** The manager is picked with the Employees search and checked before
     anything is created. The start date is **information only**: the account is enabled at once.

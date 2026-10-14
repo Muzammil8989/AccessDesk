@@ -707,7 +707,11 @@ try {
   check('nothing was created for the duplicate', onboarding.created.length === 0);
 
   await fillOnboardForm('nina.novak', 'nina@example.com');
-  await win.getByText('Employee onboarded').waitFor({ timeout: 15000 });
+  // Every onboarding creates a checklist, which needs the AccessDesk database. Without one the
+  // account is still created and only that step fails, so the screen offers Retry.
+  await win
+    .getByText(HAS_DATABASE ? 'Employee onboarded' : 'Onboarding is not finished')
+    .waitFor({ timeout: 15000 });
   onboardedPassword = (await win.getByLabel('Temporary password').innerText()).trim();
   check(
     'onboarding shows a 16 character one-time password',
@@ -725,6 +729,15 @@ try {
       createdUser.body.credentials?.[0]?.temporary === true &&
       createdUser.body.credentials[0].value === onboardedPassword,
   );
+  if (!HAS_DATABASE) {
+    check(
+      'without a database the account is kept and only the checklist step fails',
+      createdUser !== undefined &&
+        (await win.getByText('Create the checklist').isVisible()) &&
+        (await win.getByText('Failed', { exact: true }).isVisible()) &&
+        (await win.getByText('Retry', { exact: true }).isVisible()),
+    );
+  }
   check(
     'the user was added to the department and given the role',
     createdUser !== undefined &&
@@ -796,7 +809,8 @@ try {
     const partialPassword = (await win.getByLabel('Temporary password').innerText()).trim();
     check(
       'a failed step shows the partial screen with the password still visible',
-      /^[A-Za-z0-9]{16}$/.test(partialPassword) && (await win.getByText('Failed').isVisible()),
+      /^[A-Za-z0-9]{16}$/.test(partialPassword) &&
+        (await win.getByText('Failed', { exact: true }).isVisible()),
     );
     await win.screenshot({ path: path.join(SHOTS, '7-partial.png') });
     const secondUser = onboarding.created.find((c) => c.body.username === 'second.hire');
@@ -832,6 +846,30 @@ try {
     const db = new pg.Client({ connectionString: E2E_DATABASE_URL });
     await db.connect();
     try {
+      const second = onboarding.created.find((c) => c.body.username === 'second.hire');
+      const secondChecklist = await db.query(
+        `SELECT c.status, t.name AS template,
+                (SELECT count(*)::int FROM checklist_items i WHERE i.checklist_id = c.id) AS tasks
+         FROM employee_checklists c LEFT JOIN onboarding_templates t ON t.id = c.template_id
+         WHERE c.subject_id = $1`,
+        [second.id],
+      );
+      const secondAudit = await db.query(
+        `SELECT outcome FROM app_audit_log
+         WHERE target_subject_id = $1 AND action = 'onboarding.create_checklist'`,
+        [second.id],
+      );
+      check(
+        'the checklist skipped by the failed role step was created once by Retry, from General onboarding',
+        secondChecklist.rows.length === 1 &&
+          secondChecklist.rows[0].status === 'OPEN' &&
+          secondChecklist.rows[0].template === 'General onboarding' &&
+          secondChecklist.rows[0].tasks === 4 &&
+          secondAudit.rows.length === 1 &&
+          secondAudit.rows[0].outcome === 'SUCCESS',
+        JSON.stringify([secondChecklist.rows, secondAudit.rows]),
+      );
+
       const templateSelect = win.getByLabel('Template (optional)');
       await templateSelect.waitFor({ timeout: 10000 });
       const templateOptions = await templateSelect.locator('option').allInnerTexts();
@@ -844,6 +882,15 @@ try {
         'a template with an admin-level role is disabled for an hr-admin, with the reason',
         (await templateSelect.locator('option', { hasText: 'HR' }).isDisabled()) &&
           (await win.getByText(/Not available to you: HR/).isVisible()),
+      );
+
+      check(
+        'with no template the form says the checklist starts with the General onboarding tasks',
+        (await win
+          .getByText('From General onboarding, the default tasks for every new employee.')
+          .isVisible()) &&
+          (await win.getByText('Hand over laptop', { exact: true }).isVisible()) &&
+          (await win.getByText('Introduce to the team and manager', { exact: true }).isVisible()),
       );
 
       await win.getByLabel('First name').fill('Tina');
@@ -862,6 +909,11 @@ try {
         (await win.getByText('Assign the role developer').isVisible()) &&
           (await win.getByText('Add the task "Order laptop" to their checklist').isVisible()),
       );
+      check(
+        'with a template that has its own tasks the form shows only those, not the default ones',
+        (await win.getByText('From the Developer template.').isVisible()) &&
+          (await win.getByText('Hand over laptop', { exact: true }).count()) === 0,
+      );
       await win.screenshot({ path: path.join(SHOTS, '8-template.png') });
       await win.getByRole('button', { name: 'Onboard employee' }).click();
       await win.getByText('Employee onboarded').waitFor({ timeout: 15000 });
@@ -878,7 +930,7 @@ try {
           onboarding.groupPuts.filter((g) => g.userId === tina.id).length === 1,
       );
       // When everything worked the steps start closed; open them to read the list.
-      await win.getByText('Steps', { exact: true }).click();
+      await win.locator('summary').filter({ hasText: 'Steps' }).click();
       check(
         'the result lists the template role step and the checklist step as done',
         (await win.getByText('Assign the template role').isVisible()) &&
@@ -996,7 +1048,7 @@ try {
       await win.getByLabel('Department').selectOption({ label: 'Engineering' });
 
       await win.getByLabel('Search for a manager').fill('user07');
-      const disabledChoice = win.getByRole('radio', { name: /User 07/ });
+      const disabledChoice = win.getByRole('button', { name: /User 07/ });
       await disabledChoice.waitFor({ timeout: 10000 });
       check(
         'a person with a disabled account is listed but cannot be chosen as manager',
@@ -1004,12 +1056,8 @@ try {
           (await win.getByText(/account disabled, cannot be chosen/).isVisible()),
       );
       await win.getByLabel('Search for a manager').fill('ann');
-      await win.getByRole('radio', { name: /Ann Lee/ }).click();
-      check(
-        'moving to a person does not pick them until the button is pressed',
-        await win.getByRole('button', { name: 'Use this person as manager' }).isEnabled(),
-      );
-      await win.getByRole('button', { name: 'Use this person as manager' }).click();
+      // One click on a person chooses them; the Remove button is the undo.
+      await win.getByRole('button', { name: /Ann Lee/ }).click();
       check(
         'the chosen manager is shown with a Remove button',
         await win.getByRole('button', { name: 'Remove Ann Lee as manager' }).isVisible(),
@@ -1038,28 +1086,41 @@ try {
           (await win.getByText('Oct 20, 2026').isVisible()) &&
           (await win.getByText(/It does not unlock on this date/).isVisible()),
       );
-      await win.getByText('This checklist has no tasks.').waitFor({ timeout: 10000 });
+      const maxPassword = (await win.getByLabel('Temporary password').innerText()).trim();
+      await win.getByRole('checkbox', { name: 'Hand over laptop' }).waitFor({ timeout: 10000 });
       check(
-        'a checklist with no tasks offers "Mark as done" and says it stays open',
-        (await win.getByRole('button', { name: 'Mark as done' }).isVisible()) &&
-          (await win.getByText('It stays in the Open list until you mark it as done.').isVisible()),
+        'with no template the checklist starts with the four General onboarding tasks, none ticked',
+        (await win.getByRole('checkbox').count()) === 4 &&
+          (await win.getByText('0 of 4 tasks done', { exact: true }).isVisible()) &&
+          (await win.getByText('This checklist has no tasks.').count()) === 0,
       );
 
       const saved = await db.query(
         `SELECT status, completed_at, manager_subject_id, start_date::text AS start_date,
-                (SELECT count(*)::int FROM checklist_items i WHERE i.checklist_id = c.id) AS tasks
+                (SELECT count(*)::int FROM checklist_items i WHERE i.checklist_id = c.id) AS tasks,
+                (SELECT name FROM onboarding_templates t WHERE t.id = c.template_id) AS template
          FROM employee_checklists c WHERE c.subject_id = $1`,
         [max.id],
       );
       check(
-        'the saved checklist is open, not done, with the manager id and the start date only',
+        'the saved checklist is open, not done, with the default tasks, the manager id and the start date only',
         saved.rows.length === 1 &&
           saved.rows[0].status === 'OPEN' &&
           saved.rows[0].completed_at === null &&
           saved.rows[0].manager_subject_id === ann.id &&
           saved.rows[0].start_date === '2026-10-20' &&
-          saved.rows[0].tasks === 0,
+          saved.rows[0].tasks === 4 &&
+          saved.rows[0].template === 'General onboarding',
         JSON.stringify(saved.rows),
+      );
+      const maxChecklistAudit = await db.query(
+        `SELECT outcome FROM app_audit_log
+         WHERE target_subject_id = $1 AND action = 'onboarding.create_checklist'`,
+        [max.id],
+      );
+      check(
+        'one create_checklist audit row was written',
+        maxChecklistAudit.rows.length === 1 && maxChecklistAudit.rows[0].outcome === 'SUCCESS',
       );
       const maxStored = JSON.stringify(
         (
@@ -1072,7 +1133,7 @@ try {
       );
       check(
         'no saved row or audit row holds a name, an email, a username or the manager name',
-        !['Max', 'Mgr', 'max.mgr', 'Ann', 'Lee', 'ann@example.com'].some((secret) =>
+        ![maxPassword, 'Max', 'Mgr', 'max.mgr', 'Ann', 'Lee', 'ann@example.com'].some((secret) =>
           maxStored.includes(secret),
         ),
       );
@@ -1082,21 +1143,35 @@ try {
       const maxRow = win.getByRole('row', { name: /Max Mgr/ });
       await maxRow.waitFor({ timeout: 10000 });
       check(
-        'it shows in the Open list with "No tasks", the manager name and the start date',
-        (await maxRow.getByText('No tasks').isVisible()) &&
+        'it shows in the Open list with its progress, General onboarding, the manager name and the start date',
+        (await maxRow.getByText('0 of 4 tasks done', { exact: true }).isVisible()) &&
+          (await maxRow.getByText('General onboarding').isVisible()) &&
           (await maxRow.getByText('Ann Lee').isVisible()) &&
           (await maxRow.getByText('Oct 20, 2026').isVisible()),
       );
-      await win.screenshot({ path: path.join(SHOTS, '11-open-empty.png') });
+      await win.screenshot({ path: path.join(SHOTS, '11-open-default.png') });
 
       await maxRow.getByRole('link', { name: /Open the checklist for Max Mgr/ }).click();
       await win.getByRole('heading', { name: 'Checklist for Max Mgr' }).waitFor({ timeout: 10000 });
       check(
-        'the checklist screen shows the manager and the start date',
-        await win.getByText(/Manager Ann Lee · Start date Oct 20, 2026/).isVisible(),
+        'the checklist screen shows where the tasks came from, the manager and the start date',
+        await win
+          .getByText(/Tasks from General onboarding · Manager Ann Lee · Start date Oct 20, 2026/)
+          .isVisible(),
       );
-      await win.getByRole('button', { name: 'Mark as done' }).click();
-      await win.getByText('Marked as done', { exact: true }).waitFor({ timeout: 10000 });
+      const maxTasks = [
+        'Hand over laptop',
+        'Create email account',
+        'Hand over access card',
+        'Introduce to the team and manager',
+      ];
+      for (const [index, title] of maxTasks.entries()) {
+        await win.getByRole('checkbox', { name: title }).click();
+        await win
+          .getByText(`${index + 1} of 4 tasks done`, { exact: true })
+          .waitFor({ timeout: 10000 });
+      }
+      await win.getByText('All tasks done', { exact: true }).first().waitFor({ timeout: 10000 });
       const closed = await db.query(
         `SELECT status, completed_at FROM employee_checklists WHERE subject_id = $1`,
         [max.id],
@@ -1108,10 +1183,11 @@ try {
         )
       ).rows.map((row) => row.action);
       check(
-        'closing it saves the status and writes an audit row',
+        'ticking the last task closes it by itself, and each tick wrote an audit row',
         closed.rows[0].status === 'COMPLETED' &&
           closed.rows[0].completed_at !== null &&
-          closeActions.includes('checklist.close'),
+          closeActions.filter((action) => action === 'checklist.item_done').length === 4 &&
+          !closeActions.includes('checklist.close'),
         closeActions.join(),
       );
 
@@ -1127,10 +1203,58 @@ try {
       const doneRow = win.getByRole('row', { name: /Max Mgr/ });
       await doneRow.waitFor({ timeout: 10000 });
       check(
-        'and it is in the Done list as "Marked as done", still showing its manager and start date',
-        (await doneRow.getByText('Marked as done', { exact: true }).isVisible()) &&
+        'and it is in the Done list as "All tasks done", still showing its manager and start date',
+        (await doneRow.getByText('All tasks done', { exact: true }).isVisible()) &&
           (await doneRow.getByText('Ann Lee').isVisible()) &&
           (await doneRow.getByText('Oct 20, 2026').isVisible()),
+      );
+
+      // ---- no template, no manager, no start date: the checklist is still created, from the default
+      await win.getByRole('link', { name: 'Onboard', exact: true }).click();
+      await win.getByLabel('First name').waitFor({ timeout: 10000 });
+      await win.getByLabel('First name').fill('Nora');
+      await win.getByLabel('Last name').fill('Plain');
+      await win.getByLabel('Email').fill('nora.plain@example.com');
+      await win.getByLabel('Username').fill('nora.plain');
+      await win.getByLabel('Department').selectOption({ label: 'Engineering' });
+      await win.getByRole('button', { name: 'Onboard employee' }).click();
+      await win.getByText('Employee onboarded').waitFor({ timeout: 15000 });
+      const noraPassword = (await win.getByLabel('Temporary password').innerText()).trim();
+      await win.getByRole('checkbox', { name: 'Hand over laptop' }).waitFor({ timeout: 10000 });
+
+      const nora = onboarding.created.find((c) => c.body.username === 'nora.plain');
+      const noraRows = await db.query(
+        `SELECT c.status, c.manager_subject_id, c.start_date, c.completed_at, t.name AS template,
+                (SELECT count(*)::int FROM checklist_items i WHERE i.checklist_id = c.id) AS tasks
+         FROM employee_checklists c LEFT JOIN onboarding_templates t ON t.id = c.template_id
+         WHERE c.subject_id = $1`,
+        [nora.id],
+      );
+      check(
+        'with nothing optional filled in there is still one open checklist, from General onboarding',
+        noraRows.rows.length === 1 &&
+          noraRows.rows[0].status === 'OPEN' &&
+          noraRows.rows[0].completed_at === null &&
+          noraRows.rows[0].manager_subject_id === null &&
+          noraRows.rows[0].start_date === null &&
+          noraRows.rows[0].template === 'General onboarding' &&
+          noraRows.rows[0].tasks === 4,
+        JSON.stringify(noraRows.rows),
+      );
+      const noraAudit = await db.query(
+        `SELECT action, outcome, details::text AS details FROM app_audit_log
+         WHERE target_subject_id = $1 ORDER BY created_at, action`,
+        [nora.id],
+      );
+      const noraAuditText = JSON.stringify(noraAudit.rows);
+      check(
+        'one audit row per step, and none holds the password, a name, the email or the username',
+        noraAudit.rows.filter((row) => row.action.startsWith('onboarding.')).length === 4 &&
+          noraAudit.rows.every((row) => row.outcome === 'SUCCESS') &&
+          ![noraPassword, 'Nora', 'Plain', 'nora.plain'].some((secret) =>
+            noraAuditText.includes(secret),
+          ),
+        noraAudit.rows.map((row) => row.action).join(),
       );
     } finally {
       await db.end().catch(() => {});

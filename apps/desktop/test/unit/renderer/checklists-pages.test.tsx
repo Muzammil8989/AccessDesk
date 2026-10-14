@@ -23,6 +23,7 @@ const summary = (n: number, overrides: Record<string, unknown> = {}) => ({
   completedAt: null,
   totalCount: 3,
   doneCount: 1,
+  templateName: 'General onboarding',
   person: { displayName: `Person ${n}`, username: `person${n}` },
   manager: null,
   startDate: null,
@@ -52,6 +53,8 @@ describe('Open checklists screen', () => {
     expect(within(table).getByText('Person 1')).toBeInTheDocument();
     expect(within(table).getByText('person1')).toBeInTheDocument();
     expect(within(table).getByText('1 of 3 tasks done')).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Tasks from' })).toBeInTheDocument();
+    expect(within(table).getByText('General onboarding')).toBeInTheDocument();
     expect(within(table).getByText('Bea Boss')).toBeInTheDocument();
     expect(within(table).getByText('Oct 20, 2026')).toBeInTheDocument();
     expect(screen.getByText('Showing 1–1 of 1')).toBeInTheDocument();
@@ -162,6 +165,23 @@ describe('Open checklists screen', () => {
 
     expect(within(row).getAllByText('—')).toHaveLength(2);
     expect(screen.getByText(/Start dates are for information only/)).toBeInTheDocument();
+  });
+
+  it('shows the template the tasks came from, and a dash when there is none', async () => {
+    installFakeApi({
+      apiGet: async () =>
+        list([
+          summary(1, { templateName: 'Developer' }),
+          summary(2, { templateName: null, manager: null }),
+        ]),
+    });
+    renderRoutes(routes, '/onboard/checklists');
+
+    const first = (await screen.findByText('Person 1')).closest('tr')!;
+    const second = screen.getByText('Person 2').closest('tr')!;
+
+    expect(within(first).getByText('Developer')).toBeInTheDocument();
+    expect(within(second).getAllByText('—')).toHaveLength(3);
   });
 
   it('has a link back to Onboard', async () => {
@@ -308,9 +328,20 @@ describe('Checklist screen for one person', () => {
 
     expect(heading).toHaveFocus();
     expect(
-      screen.getByText('Username ann.lee · Template Developer · Onboarded Oct 9, 2026'),
+      screen.getByText('Username ann.lee · Tasks from Developer · Onboarded Oct 9, 2026'),
     ).toBeInTheDocument();
     expect(await screen.findByRole('checkbox', { name: 'Order laptop' })).toBeInTheDocument();
+  });
+
+  it('names General onboarding as the source of the tasks when the default was used', async () => {
+    installFakeApi({ apiGet: async () => ok(detail({ templateName: 'General onboarding' })) });
+    renderRoutes(routes, `/onboard/checklists/${id(1)}`);
+
+    expect(
+      await screen.findByText(
+        'Username ann.lee · Tasks from General onboarding · Onboarded Oct 9, 2026',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('says so, instead of leaving a blank, when the person is not in the identity provider', async () => {

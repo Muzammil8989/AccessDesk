@@ -6,6 +6,27 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- **Every onboarding creates a checklist.** Before, no checklist was made when there was no template, or
+  the template had no manual tasks, unless a manager or a start date was given, and a checklist with only
+  those was empty. Now the `create_checklist` step always runs. Its tasks are the chosen template's
+  manual tasks, or, with no template or none of its own, those of a new default template, **General
+  onboarding** (Hand over laptop, Create email account, Hand over access card, Introduce to the team and
+  manager; no group or role items, so the role rule is unaffected). The manager and start date are only
+  information on it. One checklist per employee still holds, a checklist is never created as done, and
+  Retry never makes a second one. The Onboard form says which tasks the checklist will start with, and
+  the checklist list and detail screens show which template the tasks came from. If no default template
+  exists, the checklist is still created, empty, and a warning is logged. The default is read inside the
+  step, so a database failure gives a partial result with Retry, not a failed onboarding.
+- **Database (one new migration; run `pnpm --filter @accessdesk/api db:deploy` on existing databases).**
+  `onboarding_templates.is_default` (`false` for every existing row). It adds only the column: no template
+  and no checklist is touched. The seed adds General onboarding and is now **create-only-if-missing** for
+  all templates, so it never changes one that exists and edits to `seed.ts` do not reach an existing
+  database.
+- **The end-to-end test works again and covers this.** Two checks had gone stale since the employee
+  directory work (the manager picker is now one click on a person, and the result's "Steps" toggle was
+  matched on exact text). Without `TEST_DATABASE_URL` the first onboarding now ends partial, with only the
+  checklist step failed, because every onboarding needs the database.
+
 - **The desktop app loads and animates more smoothly.** The Employees, Onboard, Checklists and Settings
   screens load when you open them, so the sign-in path no longer pays for the onboarding form. Moving
   between screens, and from the onboarding form to its result, is a short fade (React view

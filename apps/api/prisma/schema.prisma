@@ -56,6 +56,7 @@ model OnboardingTemplate {
   description   String?
   departmentRef String?  @map("department_ref")
   defaultRole   String?  @map("default_role")
+  isDefault     Boolean  @default(false) @map("is_default")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 

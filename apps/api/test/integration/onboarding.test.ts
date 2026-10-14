@@ -1,6 +1,6 @@
 import { IdentityProviderError, type IdentityProvider } from '@accessdesk/identity';
 import { createInMemoryIdentityProvider } from '@accessdesk/identity/testing';
-import { ADMIN_ROLE_REASON } from '@accessdesk/shared';
+import { ADMIN_ROLE_REASON, type Template } from '@accessdesk/shared';
 import { Writable } from 'node:stream';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { RETRY_WINDOW_MS } from '../../src/modules/onboarding/onboarding.service';
@@ -8,10 +8,12 @@ import {
   buildTestApp,
   bearer,
   createAuthHarness,
+  fakeTemplateRepository,
   type AuthHarness,
   type TestAppOptions,
 } from '../helpers/harness';
 import { InMemoryAuditRepository } from '../helpers/in-memory-audit';
+import { InMemoryChecklistRepository } from '../helpers/in-memory-checklists';
 
 let harness: AuthHarness;
 beforeAll(async () => {
@@ -19,6 +21,23 @@ beforeAll(async () => {
 });
 
 const START = new Date('2026-10-08T10:00:00.000Z');
+
+const GENERAL_TEMPLATE: Template = {
+  id: '5b0e7a43-1c3e-4b6e-9a58-0d2a4f6c8e99',
+  name: 'General onboarding',
+  description: null,
+  departmentRef: null,
+  defaultRole: null,
+  isDefault: true,
+  items: ['Hand over laptop', 'Create email account'].map((title, position) => ({
+    id: `general-${position}`,
+    title,
+    description: null,
+    kind: 'MANUAL_TASK' as const,
+    targetRef: null,
+    position,
+  })),
+};
 const PASSWORD_PATTERN = /^[a-hj-km-np-zA-HJ-NP-Z2-9]{16}$/;
 
 function collectLogs() {
@@ -47,9 +66,14 @@ async function setup(
   const clock = () => clockState.now;
   const audit = new InMemoryAuditRepository(clock);
   const logs = collectLogs();
+  const checklists = new InMemoryChecklistRepository(audit, {
+    [GENERAL_TEMPLATE.id]: GENERAL_TEMPLATE.name,
+  });
   const app = await buildTestApp(harness, {
     identity: options.wrapIdentity ? options.wrapIdentity(fake.provider) : fake.provider,
     audit,
+    checklists,
+    templates: fakeTemplateRepository([GENERAL_TEMPLATE]),
     clock,
     logStream: logs.stream,
     config: { logLevel: 'trace', ...options.config },
@@ -68,7 +92,7 @@ async function setup(
     return bearer(await harness.makeToken({ roles, subject }));
   }
 
-  return { fake, app, audit, logs, clockState, engineeringId, salesId, body, as };
+  return { fake, app, audit, checklists, logs, clockState, engineeringId, salesId, body, as };
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>;
@@ -102,6 +126,12 @@ describe('POST /onboarding', () => {
       { name: 'create_user', status: 'done' },
       { name: 'add_to_group', status: 'done' },
       { name: 'assign_role', status: 'done' },
+      { name: 'create_checklist', status: 'done' },
+    ]);
+    expect(s.checklists.rows).toHaveLength(1);
+    expect(s.checklists.rows[0]?.items.map((task) => task.title)).toEqual([
+      'Hand over laptop',
+      'Create email account',
     ]);
     expect(result.temporaryPassword).toMatch(PASSWORD_PATTERN);
     expect(result.temporaryPassword).toMatch(/[a-z]/);
@@ -205,7 +235,21 @@ describe('POST /onboarding', () => {
         details: { role: 'member' },
         createdAt: START,
       },
+      {
+        actorId: 'admin-7',
+        action: 'onboarding.create_checklist',
+        outcome: 'SUCCESS',
+        targetSubjectId: subjectId,
+        requestId,
+        details: { taskCount: '2', templateId: GENERAL_TEMPLATE.id },
+        createdAt: START,
+      },
     ]);
+    // No password and nothing personal in any audit row.
+    const stored = JSON.stringify(s.audit.rows);
+    for (const secret of [res.json().temporaryPassword, 'ann@example.com', 'ann.lee', 'Ann']) {
+      expect(stored).not.toContain(secret);
+    }
   });
 
   it('never puts the password, names, email or username in the logs or the audit details', async () => {
@@ -505,6 +549,11 @@ describe('POST /onboarding', () => {
         message: 'The identity provider could not complete this step.',
       },
       { name: 'assign_role', status: 'skipped', message: 'Not run because an earlier step failed' },
+      {
+        name: 'create_checklist',
+        status: 'skipped',
+        message: 'Not run because an earlier step failed',
+      },
     ]);
     expect(await s.fake.provider.findUsers({ username: 'ann.lee', exact: true })).toHaveLength(1);
     expect(s.fake.inspect(result.subjectId)).toMatchObject({ groupIds: [], roleNames: [] });
@@ -535,6 +584,11 @@ describe('POST /onboarding', () => {
         status: 'failed',
         message:
           'The identity provider refused this step. Your account may be missing a permission.',
+      },
+      {
+        name: 'create_checklist',
+        status: 'skipped',
+        message: 'Not run because an earlier step failed',
       },
     ]);
     expect(s.logs.text()).toContain('Onboarding step failed');
@@ -623,6 +677,7 @@ describe('POST /onboarding/:subjectId/retry', () => {
         { name: 'create_user', status: 'skipped', message: 'Already done' },
         { name: 'add_to_group', status: 'done' },
         { name: 'assign_role', status: 'done' },
+        { name: 'create_checklist', status: 'done' },
       ],
     });
     expect(res.headers['cache-control']).toBe('no-store');
@@ -635,7 +690,9 @@ describe('POST /onboarding/:subjectId/retry', () => {
       ['onboarding.add_to_group', 'FAILURE'],
       ['onboarding.add_to_group', 'SUCCESS'],
       ['onboarding.assign_role', 'SUCCESS'],
+      ['onboarding.create_checklist', 'SUCCESS'],
     ]);
+    expect(s.checklists.rows).toHaveLength(1);
   });
 
   it('skips the steps that are already satisfied and does not repeat their calls', async () => {
@@ -655,6 +712,7 @@ describe('POST /onboarding/:subjectId/retry', () => {
       { name: 'create_user', status: 'skipped', message: 'Already done' },
       { name: 'add_to_group', status: 'skipped', message: 'Already done' },
       { name: 'assign_role', status: 'done' },
+      { name: 'create_checklist', status: 'done' },
     ]);
     expect(s.fake.callCount('addUserToGroup')).toBe(groupCallsBefore);
   });
@@ -679,8 +737,10 @@ describe('POST /onboarding/:subjectId/retry', () => {
       'skipped',
       'skipped',
       'skipped',
+      'skipped',
     ]);
     expect(s.audit.rows).toHaveLength(rowsAfterFirst);
+    expect(s.checklists.rows).toHaveLength(1);
   });
 
   it('answers 207 again when a step still fails', async () => {

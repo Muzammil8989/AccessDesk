@@ -109,6 +109,7 @@ export function ChecklistsPage() {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Employee</TableHead>
+                <TableHead>Tasks from</TableHead>
                 <TableHead>Manager</TableHead>
                 <TableHead>Start date</TableHead>
                 <TableHead>Progress</TableHead>
@@ -123,6 +124,9 @@ export function ChecklistsPage() {
                   <TableRow key={i} className="hover:bg-transparent">
                     <TableCell>
                       <Skeleton className="h-4 w-32" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-28" />
                     </TableCell>
                     <TableCell>
                       <Skeleton className="h-4 w-24" />
@@ -144,6 +148,7 @@ export function ChecklistsPage() {
                       {item.person ? item.person.username : 'Not found in the identity provider'}
                     </div>
                   </TableCell>
+                  <TableCell>{item.templateName ?? '—'}</TableCell>
                   <TableCell>
                     {item.manager ? (item.manager.person?.displayName ?? 'Unknown person') : '—'}
                   </TableCell>
@@ -181,14 +186,14 @@ export function ChecklistsPage() {
               ))}
               {data && data.items.length === 0 && (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={5} className="p-0">
+                  <TableCell colSpan={6} className="p-0">
                     <EmptyState icon={ClipboardCheck}>
                       <p className="text-title-medium">
                         {filter === 'open' ? 'No open checklists.' : 'No finished checklists yet.'}
                       </p>
                       <p className="text-body-medium text-on-surface-variant">
-                        Choosing a template with manual tasks, or giving a manager or a start date,
-                        when you onboard someone creates one.
+                        Onboarding someone creates one, with the tasks of the chosen template or of
+                        General onboarding.
                       </p>
                     </EmptyState>
                   </TableCell>
