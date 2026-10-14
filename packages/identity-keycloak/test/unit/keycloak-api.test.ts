@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { createKeycloakIdentityProvider } from '../../src/index';
 import { parseIssuerUrl } from '../../src/keycloak-api';
-import { SUBJECT_ID, call, jsonResponse, setup } from '../helpers/mock-fetch';
+import { SUBJECT_ID, call, jsonResponse, setup, setupWith } from '../helpers/mock-fetch';
 
 const ADMIN = 'http://idp.test/admin/realms/company%20platform';
 
+const memberPage = (from: number, count: number) =>
+  jsonResponse(
+    Array.from({ length: count }, (_, i) => ({
+      id: `u${from + i}`,
+      username: `user${String(from + i).padStart(4, '0')}`,
+    })),
+  );
+
 describe('Keycloak Admin API calls', () => {
   it('lists users with search and paging, forwarding the admin token', async () => {
-    const { provider, fetchMock } = setup(jsonResponse([]));
+    const { provider, fetchMock } = setup(jsonResponse([]), jsonResponse(0));
 
-    await provider.listUsers({ search: 'ann', first: 20, max: 10 });
+    await provider.listUsersPage({ search: 'ann', first: 20, max: 10 });
 
     const { url, init } = call(fetchMock);
     expect(url).toBe(`${ADMIN}/users?search=ann&first=20&max=10`);
@@ -18,15 +26,97 @@ describe('Keycloak Admin API calls', () => {
   });
 
   it('omits empty query values', async () => {
-    const { provider, fetchMock } = setup(jsonResponse([]));
-    await provider.listUsers({ search: '', max: 5 });
-    expect(call(fetchMock).url).toBe(`${ADMIN}/users?max=5`);
+    const { provider, fetchMock } = setup(jsonResponse([]), jsonResponse(0));
+    await provider.listUsersPage({ search: '', max: 5 });
+    expect(call(fetchMock, 0).url).toBe(`${ADMIN}/users?first=0&max=5`);
+    expect(call(fetchMock, 1).url).toBe(`${ADMIN}/users/count`);
   });
 
-  it('counts users', async () => {
-    const { provider, fetchMock } = setup(jsonResponse(42));
-    expect(await provider.countUsers({ search: 'a' })).toBe(42);
-    expect(call(fetchMock).url).toBe(`${ADMIN}/users/count?search=a`);
+  it('counts users with the same search, so the total matches the list', async () => {
+    const { provider, fetchMock } = setup(jsonResponse([]), jsonResponse(42));
+    expect((await provider.listUsersPage({ search: 'a' })).total).toBe(42);
+    expect(call(fetchMock, 1).url).toBe(`${ADMIN}/users/count?search=a`);
+  });
+
+  it.each([
+    [true, 'true'],
+    [false, 'false'],
+  ])('sends enabled=%s to both the list and the count', async (enabled, wire) => {
+    const { provider, fetchMock } = setup(jsonResponse([]), jsonResponse(0));
+
+    await provider.listUsersPage({ search: 'ann', enabled });
+
+    expect(call(fetchMock, 0).url).toBe(
+      `${ADMIN}/users?search=ann&enabled=${wire}&first=0&max=100`,
+    );
+    expect(call(fetchMock, 1).url).toBe(`${ADMIN}/users/count?search=ann&enabled=${wire}`);
+  });
+
+  it('reads the members of a group in pages of 100 and filters them itself', async () => {
+    const { provider, fetchMock } = setup(memberPage(0, 100), memberPage(100, 5));
+
+    const page = await provider.listUsersPage({ groupId: 'g/1', search: 'user01', max: 3 });
+
+    expect(call(fetchMock, 0).url).toBe(
+      `${ADMIN}/groups/g%2F1/members?briefRepresentation=true&first=0&max=100`,
+    );
+    expect(call(fetchMock, 1).url).toBe(
+      `${ADMIN}/groups/g%2F1/members?briefRepresentation=true&first=100&max=100`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(page.total).toBe(5);
+    expect(page.users.map((u) => u.username)).toEqual(['user0100', 'user0101', 'user0102']);
+    expect(page.capped).toBe(false);
+  });
+
+  it('URL-encodes a role name when reading its holders', async () => {
+    const { provider, fetchMock } = setup(memberPage(0, 1));
+
+    await provider.listUsersPage({ role: 'team lead/a%b?c' });
+
+    expect(call(fetchMock).url).toBe(
+      `${ADMIN}/roles/team%20lead%2Fa%25b%3Fc/users?briefRepresentation=true&first=0&max=100`,
+    );
+  });
+
+  it('asks for one more member than the cap, to tell a full list from a cut-short one', async () => {
+    const { provider, fetchMock } = setupWith(
+      { memberFilterCap: 150 },
+      memberPage(0, 100),
+      memberPage(100, 51),
+    );
+
+    const page = await provider.listUsersPage({ role: 'developer', max: 100 });
+
+    expect(call(fetchMock, 1).url).toContain('first=100&max=51');
+    expect(page.capped).toBe(true);
+    expect(page.total).toBe(150);
+    expect(page.users).toHaveLength(100);
+  });
+
+  it('is not capped when the list holds exactly the cap', async () => {
+    const { provider, fetchMock } = setupWith(
+      { memberFilterCap: 100 },
+      memberPage(0, 100),
+      memberPage(100, 0),
+    );
+
+    const page = await provider.listUsersPage({ groupId: 'g1' });
+
+    expect(call(fetchMock, 1).url).toContain('first=100&max=1');
+    expect(page).toMatchObject({ total: 100, capped: false });
+  });
+
+  it('reports an unknown group or role as the provider answered it', async () => {
+    const { provider } = setup(
+      jsonResponse({ errorMessage: 'Could not find group' }, { status: 404 }),
+      jsonResponse({ errorMessage: 'Could not find role' }, { status: 404 }),
+    );
+
+    await expect(provider.listUsersPage({ groupId: 'nope' })).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(provider.listUsersPage({ role: 'nope' })).rejects.toMatchObject({ status: 404 });
   });
 
   it('gets one user', async () => {
@@ -181,7 +271,7 @@ describe('Keycloak Admin API calls', () => {
       `${ADMIN}/roles?briefRepresentation=true&first=100&max=100`,
     );
     expect(roles).toHaveLength(102);
-    expect(roles[0]).toEqual({ name: 'role-0', description: null });
+    expect(roles[0]).toEqual({ name: 'role-0', description: null, builtin: false });
   });
 
   it('disables a user with a partial update', async () => {
@@ -240,8 +330,11 @@ describe('Keycloak Admin API calls', () => {
   });
 
   it('reads the error message from the answer body', async () => {
-    const { provider } = setup(jsonResponse({ error: 'invalid_grant' }, { status: 400 }));
-    await expect(provider.listUsers()).rejects.toThrow('(400): invalid_grant');
+    const { provider } = setup(
+      jsonResponse({ error: 'invalid_grant' }, { status: 400 }),
+      jsonResponse({ error: 'invalid_grant' }, { status: 400 }),
+    );
+    await expect(provider.listUsersPage()).rejects.toThrow('(400): invalid_grant');
   });
 });
 

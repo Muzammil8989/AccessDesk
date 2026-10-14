@@ -51,7 +51,7 @@ export function createFakeAdminServer() {
     if (!search) return true;
     const needle = search.toLowerCase();
     return [user.username, user.email, user.firstName, user.lastName].some((field) =>
-      field?.toLowerCase().includes(needle),
+      field?.toLowerCase().startsWith(needle),
     );
   };
 
@@ -63,9 +63,21 @@ export function createFakeAdminServer() {
       : value.toLowerCase().includes(wanted.toLowerCase());
   };
 
+  const matchesEnabled = (user: StoredUser, wanted: string | null) =>
+    wanted === null || user.enabled === (wanted === 'true');
+
+  const page = (items: StoredUser[], params: URLSearchParams) => {
+    const first = Number(params.get('first') ?? 0);
+    const max = Number(params.get('max') ?? 100);
+    return json(items.slice(first, first + max).map(representation));
+  };
+
+  const requests: string[] = [];
+
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const method = init?.method ?? 'GET';
+    requests.push(`${method} ${url.pathname}${url.search}`);
     const headers = (init?.headers ?? {}) as Record<string, string>;
     const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
 
@@ -92,6 +104,22 @@ export function createFakeAdminServer() {
       return role ? json(role) : notFound('Role');
     }
 
+    if (collection === 'roles' && id && sub === 'users' && method === 'GET') {
+      if (!roles.has(id)) return notFound('Role');
+      return page(
+        [...users.values()].filter((u) => u.roleNames.has(id)),
+        url.searchParams,
+      );
+    }
+
+    if (collection === 'groups' && id && sub === 'members' && method === 'GET') {
+      if (!groups.has(id)) return notFound('Group');
+      return page(
+        [...users.values()].filter((u) => u.groupIds.has(id)),
+        url.searchParams,
+      );
+    }
+
     if (collection === 'groups' && !id && method === 'GET') {
       const first = Number(url.searchParams.get('first') ?? 0);
       const max = Number(url.searchParams.get('max') ?? 100);
@@ -105,6 +133,7 @@ export function createFakeAdminServer() {
         const exact = url.searchParams.get('exact') === 'true';
         const found = [...users.values()]
           .filter((u) => matches(u, url.searchParams.get('search')))
+          .filter((u) => matchesEnabled(u, url.searchParams.get('enabled')))
           .filter((u) => matchesField(u.username, url.searchParams.get('username'), exact))
           .filter((u) => matchesField(u.email, url.searchParams.get('email'), exact))
           .sort((a, b) => a.username.localeCompare(b.username));
@@ -140,7 +169,9 @@ export function createFakeAdminServer() {
 
     if (id === 'count' && method === 'GET') {
       return json(
-        [...users.values()].filter((u) => matches(u, url.searchParams.get('search'))).length,
+        [...users.values()]
+          .filter((u) => matches(u, url.searchParams.get('search')))
+          .filter((u) => matchesEnabled(u, url.searchParams.get('enabled'))).length,
       );
     }
 
@@ -184,6 +215,7 @@ export function createFakeAdminServer() {
 
   return {
     fetch: fetchImpl,
+    requests,
     seedGroup(name: string): string {
       const group = { id: randomUUID(), name, path: `/${name}` };
       groups.set(group.id, group);

@@ -58,19 +58,97 @@ export function runIdentityProviderContract(
           ['ann', 'bob', 'anna-marie'].map((username) => provider.createUser({ username })),
         );
 
-        expect(await provider.countUsers()).toBe(3);
-        expect(await provider.countUsers({ search: 'ann' })).toBe(2);
-        const found = await provider.listUsers({ search: 'ann' });
-        expect(found.map((u) => u.username).sort()).toEqual(['ann', 'anna-marie']);
-        expect(await provider.countUsers({ search: 'zzz' })).toBe(0);
-        expect(await provider.listUsers({ search: 'zzz' })).toEqual([]);
+        expect(await provider.listUsersPage()).toMatchObject({ total: 3, capped: false });
+        const found = await provider.listUsersPage({ search: 'ann' });
+        expect(found.total).toBe(2);
+        expect(found.users.map((u) => u.username).sort()).toEqual(['ann', 'anna-marie']);
+        expect(await provider.listUsersPage({ search: 'zzz' })).toEqual({
+          users: [],
+          total: 0,
+          capped: false,
+        });
 
-        const first = await provider.listUsers({ first: 0, max: 2 });
-        const second = await provider.listUsers({ first: 2, max: 2 });
-        expect([first.length, second.length]).toEqual([2, 1]);
-        expect([...first, ...second].map((u) => u.subjectId).sort()).toEqual(
+        const first = await provider.listUsersPage({ first: 0, max: 2 });
+        const second = await provider.listUsersPage({ first: 2, max: 2 });
+        expect([first.users.length, second.users.length]).toEqual([2, 1]);
+        expect([first.total, second.total]).toEqual([3, 3]);
+        expect([...first.users, ...second.users].map((u) => u.subjectId).sort()).toEqual(
           [...subjectIds].sort(),
         );
+      });
+
+      it('searches by the start of a name or email, ignoring case, not by a fragment', async () => {
+        const { provider } = await create();
+        await provider.createUser({
+          username: 'ann',
+          email: 'ann@example.com',
+          firstName: 'Annabel',
+          lastName: 'Marie',
+        });
+        await provider.createUser({ username: 'bob', email: 'bob@example.com' });
+
+        const total = async (search: string) => (await provider.listUsersPage({ search })).total;
+
+        expect(await total('ANN')).toBe(1);
+        expect(await total('annabel')).toBe(1);
+        expect(await total('mar')).toBe(1);
+        expect(await total('bob@ex')).toBe(1);
+        expect(await total('nabel')).toBe(0);
+        expect(await total('example.com')).toBe(0);
+      });
+
+      it('searches the same way with and without a group filter', async () => {
+        const fixture = await create();
+        const { provider } = fixture;
+        const groupId = await fixture.seedGroup('Engineering');
+        const id = await provider.createUser({ username: 'ann', firstName: 'Annabel' });
+        await provider.addUserToGroup(id, groupId);
+
+        for (const search of ['ann', 'ANNA', 'nabel', 'bel']) {
+          const plain = await provider.listUsersPage({ search });
+          const inGroup = await provider.listUsersPage({ groupId, search });
+          expect(inGroup.users.map((u) => u.subjectId)).toEqual(
+            plain.users.map((u) => u.subjectId),
+          );
+        }
+      });
+
+      it('filters by enabled and keeps the total in step with the filter', async () => {
+        const { provider } = await create();
+        const annId = await provider.createUser({ username: 'ann' });
+        await provider.createUser({ username: 'anna-marie' });
+        await provider.createUser({ username: 'bob' });
+        await provider.disableUser(annId);
+
+        const enabled = await provider.listUsersPage({ enabled: true });
+        const disabled = await provider.listUsersPage({ enabled: false });
+
+        expect(enabled.users.map((u) => u.username).sort()).toEqual(['anna-marie', 'bob']);
+        expect(enabled.total).toBe(2);
+        expect(disabled.users.map((u) => u.username)).toEqual(['ann']);
+        expect(disabled.total).toBe(1);
+      });
+
+      it('combines enabled with search and with paging', async () => {
+        const { provider } = await create();
+        const annId = await provider.createUser({ username: 'ann' });
+        await provider.createUser({ username: 'anna-marie' });
+        await provider.createUser({ username: 'anne' });
+        await provider.createUser({ username: 'bob' });
+        await provider.disableUser(annId);
+
+        const page = await provider.listUsersPage({
+          search: 'ann',
+          enabled: true,
+          first: 1,
+          max: 1,
+        });
+
+        expect(page.total).toBe(2);
+        expect(page.users.map((u) => u.username)).toEqual(['anne']);
+        expect(await provider.listUsersPage({ search: 'ann', enabled: false })).toMatchObject({
+          total: 1,
+        });
       });
 
       it('creates a user with a verified email and a temporary initial password', async () => {
@@ -191,6 +269,56 @@ export function runIdentityProviderContract(
         expect(await provider.getUserGroups(subjectId)).toEqual([]);
       });
 
+      it('lists the direct members of a group, with search, enabled and paging applied', async () => {
+        const fixture = await create();
+        const { provider } = fixture;
+        const groupId = await fixture.seedGroup('Engineering');
+        const annId = await provider.createUser({ username: 'ann' });
+        const annaId = await provider.createUser({ username: 'anna-marie' });
+        const bobId = await provider.createUser({ username: 'bob' });
+        await provider.createUser({ username: 'outsider' });
+        for (const id of [annId, annaId, bobId]) await provider.addUserToGroup(id, groupId);
+        await provider.disableUser(annaId);
+
+        const everyone = await provider.listUsersPage({ groupId });
+        expect(everyone.users.map((u) => u.username)).toEqual(['ann', 'anna-marie', 'bob']);
+        expect(everyone).toMatchObject({ total: 3, capped: false });
+
+        const active = await provider.listUsersPage({ groupId, enabled: true });
+        expect(active.users.map((u) => u.username)).toEqual(['ann', 'bob']);
+        expect(active.total).toBe(2);
+
+        const searched = await provider.listUsersPage({ groupId, search: 'ann', enabled: true });
+        expect(searched.users.map((u) => u.username)).toEqual(['ann']);
+        expect(searched.total).toBe(1);
+
+        const second = await provider.listUsersPage({ groupId, first: 1, max: 1 });
+        expect(second.users.map((u) => u.username)).toEqual(['anna-marie']);
+        expect(second.total).toBe(3);
+      });
+
+      it('lists no one for a group nobody belongs to', async () => {
+        const fixture = await create();
+        await fixture.provider.createUser({ username: 'ann' });
+        const groupId = await fixture.seedGroup('Empty');
+
+        expect(await fixture.provider.listUsersPage({ groupId })).toEqual({
+          users: [],
+          total: 0,
+          capped: false,
+        });
+      });
+
+      it('fails with a 404 IdentityProviderError when filtering by an unknown group', async () => {
+        const { provider } = await create();
+        const error = await provider
+          .listUsersPage({ groupId: 'no-such-group' })
+          .catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(IdentityProviderError);
+        expect((error as IdentityProviderError).status).toBe(404);
+      });
+
       it('fails with an IdentityProviderError for a user that does not exist', async () => {
         const fixture = await create();
         const groupId = await fixture.seedGroup('Engineering');
@@ -217,7 +345,10 @@ export function runIdentityProviderContract(
         await provider.addUserRoles(subjectId, ['developer', 'sales']);
         const assigned = await provider.getUserRoles(subjectId);
         expect(assigned.map((r) => r.name).sort()).toEqual(['developer', 'sales']);
-        for (const role of assigned) expect(role.description).toBeNull();
+        for (const role of assigned) {
+          expect(role.description).toBeNull();
+          expect(role.builtin).toBe(false);
+        }
 
         await provider.removeUserRoles(subjectId, ['developer']);
         expect((await provider.getUserRoles(subjectId)).map((r) => r.name)).toEqual(['sales']);
@@ -232,7 +363,61 @@ export function runIdentityProviderContract(
 
         const listed = await fixture.provider.listRoles();
         expect(listed.map((role) => role.name).sort()).toEqual(['developer', 'sales']);
-        for (const role of listed) expect(role.description).toBeNull();
+        for (const role of listed) {
+          expect(role.description).toBeNull();
+          expect(role.builtin).toBe(false);
+        }
+      });
+
+      it('lists the direct holders of a role, with search, enabled and paging applied', async () => {
+        const fixture = await create();
+        const { provider } = fixture;
+        await fixture.seedRole('developer');
+        await fixture.seedRole('sales');
+        const annId = await provider.createUser({ username: 'ann' });
+        const annaId = await provider.createUser({ username: 'anna-marie' });
+        const bobId = await provider.createUser({ username: 'bob' });
+        await provider.addUserRoles(annId, ['developer']);
+        await provider.addUserRoles(annaId, ['developer']);
+        await provider.addUserRoles(bobId, ['sales']);
+        await provider.disableUser(annaId);
+
+        const holders = await provider.listUsersPage({ role: 'developer' });
+        expect(holders.users.map((u) => u.username)).toEqual(['ann', 'anna-marie']);
+        expect(holders).toMatchObject({ total: 2, capped: false });
+
+        const active = await provider.listUsersPage({ role: 'developer', enabled: true });
+        expect(active.users.map((u) => u.username)).toEqual(['ann']);
+        expect(active.total).toBe(1);
+
+        const searched = await provider.listUsersPage({ role: 'developer', search: 'anna' });
+        expect(searched.users.map((u) => u.username)).toEqual(['anna-marie']);
+
+        const second = await provider.listUsersPage({ role: 'developer', first: 1, max: 1 });
+        expect(second.users.map((u) => u.username)).toEqual(['anna-marie']);
+        expect(second.total).toBe(2);
+      });
+
+      it('finds the holders of a role whose name needs URL encoding', async () => {
+        const fixture = await create();
+        const name = 'team lead/a%b?c';
+        await fixture.seedRole(name);
+        const annId = await fixture.provider.createUser({ username: 'ann' });
+        await fixture.provider.addUserRoles(annId, [name]);
+
+        const page = await fixture.provider.listUsersPage({ role: name });
+
+        expect(page.users.map((u) => u.username)).toEqual(['ann']);
+      });
+
+      it('fails with a 404 IdentityProviderError when filtering by an unknown role', async () => {
+        const { provider } = await create();
+        const error = await provider
+          .listUsersPage({ role: 'no-such-role' })
+          .catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(IdentityProviderError);
+        expect((error as IdentityProviderError).status).toBe(404);
       });
 
       it('fails with a 404 IdentityProviderError for a role that does not exist', async () => {

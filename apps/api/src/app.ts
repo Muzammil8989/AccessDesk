@@ -74,7 +74,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   healthRoutes(app, { checkDatabase: deps.checkDatabase });
   templateRoutes(app, deps.templates);
   const clock = deps.clock ?? (() => new Date());
-  employeeRoutes(app, { identityFor: deps.identityFor });
+  employeeRoutes(app, {
+    identityFor: deps.identityFor,
+    rateLimitPerMinute: config.rateLimitPerMinute,
+  });
   checklistRoutes(app, { identityFor: deps.identityFor, checklists: deps.checklists, clock });
   onboardingRoutes(app, {
     identityFor: deps.identityFor,

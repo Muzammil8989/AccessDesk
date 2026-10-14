@@ -12,15 +12,20 @@ export function jsonResponse(body: unknown, init: ResponseInit = {}) {
   });
 }
 
-export function setup(...responses: Response[]) {
+export function setupWith(options: { memberFilterCap?: number }, ...responses: Response[]) {
   const fetchMock = vi.fn<typeof fetch>();
   for (const response of responses) fetchMock.mockResolvedValueOnce(response);
   const provider = createKeycloakIdentityProvider({
     issuerUrl: ISSUER_URL,
     getToken: () => 'admin-token',
     fetch: fetchMock,
+    ...options,
   });
   return { provider, fetchMock };
+}
+
+export function setup(...responses: Response[]) {
+  return setupWith({}, ...responses);
 }
 
 export function call(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>, index = 0) {

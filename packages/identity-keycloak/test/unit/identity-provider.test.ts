@@ -6,20 +6,25 @@ describe('identity provider mapping', () => {
   it('maps a user to the neutral shape, with null for missing optional fields', async () => {
     const { provider } = setup(
       jsonResponse([{ id: SUBJECT_ID, username: 'ann', extra: 'dropped' }]),
+      jsonResponse(1),
     );
 
-    expect(await provider.listUsers()).toEqual([
-      {
-        subjectId: SUBJECT_ID,
-        username: 'ann',
-        email: null,
-        firstName: null,
-        lastName: null,
-        enabled: true,
-        emailVerified: false,
-        createdAt: null,
-      },
-    ]);
+    expect(await provider.listUsersPage()).toEqual({
+      users: [
+        {
+          subjectId: SUBJECT_ID,
+          username: 'ann',
+          email: null,
+          firstName: null,
+          lastName: null,
+          enabled: true,
+          emailVerified: false,
+          createdAt: null,
+        },
+      ],
+      total: 1,
+      capped: false,
+    });
   });
 
   it('keeps the fields the provider does send', async () => {
@@ -65,18 +70,50 @@ describe('identity provider mapping', () => {
       { id: 'g1', name: 'Engineering', path: '/Engineering' },
     ]);
     expect(await provider.getUserRoles(SUBJECT_ID)).toEqual([
-      { name: 'developer', description: 'Writes code' },
+      { name: 'developer', description: 'Writes code', builtin: false },
+    ]);
+  });
+
+  it('marks the roles the realm creates for itself as built in, and no others', async () => {
+    const names = [
+      'offline_access',
+      'uma_authorization',
+      'default-roles-company platform',
+      'Default-Roles-Company Platform',
+      'default-roles-another-realm',
+      'developer',
+    ];
+    const { provider } = setup(jsonResponse(names.map((name, i) => ({ id: `r${i}`, name }))));
+
+    const roles = await provider.getUserRoles(SUBJECT_ID);
+
+    expect(roles.map((role) => [role.name, role.builtin])).toEqual([
+      ['offline_access', true],
+      ['uma_authorization', true],
+      ['default-roles-company platform', true],
+      ['Default-Roles-Company Platform', true],
+      ['default-roles-another-realm', false],
+      ['developer', false],
     ]);
   });
 
   it('passes list parameters straight through', async () => {
     const { provider, fetchMock } = setup(jsonResponse([]), jsonResponse(0));
 
-    await provider.listUsers({ search: 'ann', first: 20, max: 10 });
-    await provider.countUsers({ search: 'ann' });
+    await provider.listUsersPage({ search: 'ann', first: 20, max: 10 });
 
     expect(call(fetchMock, 0).url).toContain('search=ann&first=20&max=10');
     expect(call(fetchMock, 1).url).toContain('/count?search=ann');
+  });
+
+  it('sorts group members by username before paging, whatever order the provider sent', async () => {
+    const member = (username: string) => ({ id: username, username, enabled: true });
+    const { provider } = setup(jsonResponse([member('cy'), member('ann'), member('bob')]));
+
+    const page = await provider.listUsersPage({ groupId: 'g1', first: 1, max: 2 });
+
+    expect(page.users.map((u) => u.username)).toEqual(['bob', 'cy']);
+    expect(page.total).toBe(3);
   });
 
   it('reports failures as IdentityProviderError, without the token', async () => {
@@ -93,10 +130,9 @@ describe('identity provider mapping', () => {
   });
 
   it('survives an error answer that is not JSON', async () => {
-    const { provider } = setup(
-      new Response('Bad Gateway', { status: 502, statusText: 'Bad Gateway' }),
-    );
-    await expect(provider.listUsers()).rejects.toMatchObject({ status: 502 });
+    const bad = () => new Response('Bad Gateway', { status: 502, statusText: 'Bad Gateway' });
+    const { provider } = setup(bad(), bad());
+    await expect(provider.listUsersPage()).rejects.toMatchObject({ status: 502 });
   });
 
   it('fails when the provider does not say where the new user is', async () => {

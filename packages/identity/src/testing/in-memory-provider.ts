@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
+  DEFAULT_MEMBER_FILTER_CAP,
   IdentityProviderError,
-  type CountUsersParams,
   type CreateUserInput,
   type FindUsersParams,
   type IdentityGroup,
@@ -24,10 +24,14 @@ export interface InMemoryUserState {
   initialPassword: InitialPassword | null;
 }
 
+export interface InMemoryIdentityProviderOptions {
+  memberFilterCap?: number;
+}
+
 export interface InMemoryIdentityProvider {
   provider: IdentityProvider;
   seedGroup(name: string): string;
-  seedRole(name: string): void;
+  seedRole(name: string, options?: { builtin?: boolean }): void;
   failNext(method: InMemoryProviderMethod, error: Error, times?: number): void;
   clearFailures(): void;
   inspect(subjectId: string): InMemoryUserState | undefined;
@@ -56,11 +60,14 @@ function matchesSearch(user: IdentityUser, search: string | undefined): boolean 
   if (!search) return true;
   const needle = search.toLowerCase();
   return [user.username, user.email, user.firstName, user.lastName].some(
-    (field) => field !== null && field.toLowerCase().includes(needle),
+    (field) => field !== null && field.toLowerCase().startsWith(needle),
   );
 }
 
-export function createInMemoryIdentityProvider(): InMemoryIdentityProvider {
+export function createInMemoryIdentityProvider(
+  options: InMemoryIdentityProviderOptions = {},
+): InMemoryIdentityProvider {
+  const memberFilterCap = options.memberFilterCap ?? DEFAULT_MEMBER_FILTER_CAP;
   const users = new Map<string, StoredUser>();
   const groups = new Map<string, IdentityGroup>();
   const roles = new Map<string, IdentityRole>();
@@ -83,23 +90,44 @@ export function createInMemoryIdentityProvider(): InMemoryIdentityProvider {
     return found;
   }
 
-  function sorted(search: string | undefined): IdentityUser[] {
-    return [...users.values()]
-      .map((entry) => entry.user)
-      .filter((user) => matchesSearch(user, search))
-      .sort((a, b) => a.username.localeCompare(b.username));
+  function byUsername(a: IdentityUser, b: IdentityUser): number {
+    return a.username.localeCompare(b.username);
+  }
+
+  function candidates(params: ListUsersParams): { pool: IdentityUser[]; capped: boolean } {
+    const all = [...users.values()];
+    let members = all;
+    if (params.groupId !== undefined) {
+      const groupId = params.groupId;
+      if (!groups.has(groupId)) throw new IdentityProviderError(404, 'Group not found');
+      members = all.filter((entry) => entry.groupIds.has(groupId));
+    } else if (params.role !== undefined) {
+      const role = params.role;
+      if (!roles.has(role)) throw new IdentityProviderError(404, 'Role not found');
+      members = all.filter((entry) => entry.roleNames.has(role));
+    }
+    const pool = members.map((entry) => entry.user).sort(byUsername);
+    const filtered = params.groupId !== undefined || params.role !== undefined;
+    return filtered && pool.length > memberFilterCap
+      ? { pool: pool.slice(0, memberFilterCap), capped: true }
+      : { pool, capped: false };
   }
 
   const provider: IdentityProvider = {
-    async listUsers(params: ListUsersParams = {}) {
-      take('listUsers');
+    async listUsersPage(params: ListUsersParams = {}) {
+      take('listUsersPage');
+      const { pool, capped } = candidates(params);
+      const matching = pool.filter(
+        (user) =>
+          matchesSearch(user, params.search) &&
+          (params.enabled === undefined || user.enabled === params.enabled),
+      );
       const first = params.first ?? 0;
-      return sorted(params.search).slice(first, first + (params.max ?? DEFAULT_PAGE_SIZE));
-    },
-
-    async countUsers(params: CountUsersParams = {}) {
-      take('countUsers');
-      return sorted(params.search).length;
+      return {
+        users: matching.slice(first, first + (params.max ?? DEFAULT_PAGE_SIZE)),
+        total: matching.length,
+        capped,
+      };
     },
 
     async findUsers(params: FindUsersParams) {
@@ -224,8 +252,8 @@ export function createInMemoryIdentityProvider(): InMemoryIdentityProvider {
       groups.set(id, { id, name, path: `/${name}` });
       return id;
     },
-    seedRole(name) {
-      roles.set(name, { name, description: null });
+    seedRole(name, roleOptions = {}) {
+      roles.set(name, { name, description: null, builtin: roleOptions.builtin ?? false });
     },
     failNext(method, error, times = 1) {
       failures.set(method, { error, remaining: times });
