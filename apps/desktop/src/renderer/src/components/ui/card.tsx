@@ -1,16 +1,24 @@
+import { cva, type VariantProps } from 'class-variance-authority';
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
 
-export function Card({ className, ...props }: ComponentProps<'div'>) {
-  return (
-    <div
-      className={cn(
-        'flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm',
-        className,
-      )}
-      {...props}
-    />
-  );
+/** M3 cards, 12px radius. `tonal` is a filled card; `outlined` has an outline and no fill. */
+const cardVariants = cva('flex flex-col gap-6 rounded-md py-6 text-on-surface', {
+  variants: {
+    variant: {
+      tonal: 'bg-surface-container-low',
+      outlined: 'border border-outline-variant bg-surface',
+    },
+  },
+  defaultVariants: { variant: 'tonal' },
+});
+
+export function Card({
+  className,
+  variant,
+  ...props
+}: ComponentProps<'div'> & VariantProps<typeof cardVariants>) {
+  return <div className={cn(cardVariants({ variant }), className)} {...props} />;
 }
 
 export function CardHeader({ className, ...props }: ComponentProps<'div'>) {
@@ -25,14 +33,14 @@ export function CardTitle({
   ...props
 }: ComponentProps<'h2'> & { as?: 'h1' | 'h2' | 'h3' }) {
   return (
-    <Heading className={cn('leading-none font-semibold', className)} {...props}>
+    <Heading className={cn('text-title-large', className)} {...props}>
       {children}
     </Heading>
   );
 }
 
 export function CardDescription({ className, ...props }: ComponentProps<'p'>) {
-  return <p className={cn('text-sm text-muted-foreground', className)} {...props} />;
+  return <p className={cn('text-body-medium text-on-surface-variant', className)} {...props} />;
 }
 
 export function CardContent({ className, ...props }: ComponentProps<'div'>) {

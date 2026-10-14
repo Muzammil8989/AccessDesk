@@ -5,13 +5,9 @@ import {
   type ListChecklistsQuery,
 } from '@accessdesk/shared';
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
-import { ApiRequestError, apiGet, parseResponse } from './api';
+import { apiGet, parseResponse, retryable } from './api';
 
 export const CHECKLIST_PAGE_SIZE = 20;
-const MAX_ATTEMPTS = 2;
-
-const retryable = (count: number, error: Error) =>
-  error instanceof ApiRequestError && error.retryable && count < MAX_ATTEMPTS;
 
 export const checklistListQuery = (status: ListChecklistsQuery['status'], page: number) =>
   queryOptions({

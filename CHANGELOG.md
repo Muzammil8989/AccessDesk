@@ -6,16 +6,49 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- **The desktop app loads and animates more smoothly.** The Employees, Onboard, Checklists and Settings
+  screens load when you open them, so the sign-in path no longer pays for the onboarding form. Moving
+  between screens, and from the onboarding form to its result, is a short fade (React view
+  transitions); it is off when the OS "reduce motion" setting is on. Typing a name no longer
+  re-renders the whole onboarding form, and the sidebar passes its collapsed state through context.
+  Behaviour, labels and accessible names are unchanged.
+- **The desktop app starts faster on slow PCs.** The screen scripts are now minified (the main one went
+  from 1.5 MB to 0.6 MB, the styles from 58 kB to 47 kB), so there is much less to download from disk
+  and parse at start-up. The window also skips spellcheck dictionaries, and the File / Edit / View /
+  Window menu bar is gone on Windows and Linux.
+- **The desktop app now follows Material Design 3.** The colours are the M3 tonal scheme generated from
+  the brand blue (light and dark, with success, warning and info colours), the font is Roboto Flex
+  (`@fontsource-variable/roboto-flex` replaces Inter, still bundled) and the text uses the M3 type
+  scale. Buttons are pill-shaped (filled, tonal, outlined, text), text fields are filled with a floating
+  label, search is a search bar, Status and the theme are segmented buttons, cards are tonal, labels are
+  chips, alerts are banners, notices are snackbars, tooltips are plain tooltips, and the sidebar is a
+  navigation drawer with a pill for the open screen. Hover, focus and press use M3 state layers.
+  **Icons no longer have a background**: the tinted circles and squares behind icons (section headers,
+  empty states, the onboarding result and its steps, no-access, coming-soon) are gone. The logo mark,
+  initials avatars and the open-screen pill keep their fill. Behaviour, labels and accessible names
+  are unchanged. See `design-system/accessdesk/MASTER.md`.
+- **Employees and Onboard are easier to use.**
+  - Employees: one toolbar (search, a Status control, Group and Role) replaces the Filters block, so the
+    list starts higher on the page. Choosing a group switches the role filter off, and the other way
+    round, with the reason shown, instead of silently clearing it. Applied filters show as chips that
+    can be removed one by one. The header shows how many people there are and has an "Onboard
+    employee" button. Username sits under the name, so the table has three columns.
+  - Onboard: three cards in task order, with the optional template first because it fills in the
+    department and role. The username is suggested from the name until it is edited. Fields are checked
+    when they are left. The Onboard and Clear buttons float at the bottom on windows narrower than
+    1280px and say how many required fields are left. The manager is chosen with one click, and
+    "Remove" is the undo (this replaces the radio and confirm button).
+  - Onboard result: the password comes first, with a new "Copy sign-in details" button. The steps are
+    closed when everything worked and open when something did not. There is a "View in Employees" link.
 - **Sidebar.** The collapse button sits at the top next to the logo, `Ctrl+B` toggles it (not while
   typing), and the choice is remembered on this device. Collapsed icons, the theme button and Sign out
   show a styled tooltip on hover and on keyboard focus (`@radix-ui/react-tooltip`, a new
   `components/ui/tooltip.tsx`) instead of the browser's `title`. Neighbouring sidebar tooltips open at
   once, and collapsed links keep their hover and active styles.
-- **Onboard screen.** The form is split into four titled cards, with a live summary of what will be
-  created and a "What happens next" list beside it on wide windows. On wide windows the summary stays in view
-  while the form scrolls and holds the "Onboard employee" and new "Clear form" buttons, so nothing floats
-  over the fields. The manager search shows avatars and a
-  "Disabled" badge. The result shows the password, checklist and a step timeline on the left and the
+- **Onboard screen.** The form is split into titled cards, with a live summary of what will be
+  created and a "What happens next" list beside it on wide windows. On wide windows the summary and the
+  "Onboard employee" and new "Clear form" buttons stay in view while the form scrolls. The manager
+  search shows avatars and a "Disabled" badge. The result shows the password, checklist and a step timeline on the left and the
   details on the right. Accessible names, focus behaviour and API calls are unchanged.
 - **Which roles onboarding may assign is now one shared rule** (ADR 0011). `canAssignRole` and
   `roleOptions` take a policy (`{ adminRoles, superAdminRole }`), and `roleViolation` is the single

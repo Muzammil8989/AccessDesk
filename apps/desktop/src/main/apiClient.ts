@@ -14,7 +14,9 @@ const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-
 export const apiPathSchema = z
   .string()
   .regex(
-    new RegExp(`^/(employees(/${UUID})?|templates|onboarding/options|checklists(/${UUID})?)$`),
+    new RegExp(
+      `^/(employees(/filter-options|/${UUID})?|templates|onboarding/options|checklists(/${UUID})?)$`,
+    ),
   );
 
 const uuidSchema = z.uuid();

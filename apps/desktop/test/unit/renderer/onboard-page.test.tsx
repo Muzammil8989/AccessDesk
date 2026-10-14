@@ -86,6 +86,8 @@ async function fillForm(overrides: { role?: string } = {}) {
   await userEvent.type(await screen.findByLabelText('First name'), 'Ann');
   await userEvent.type(screen.getByLabelText('Last name'), 'Lee');
   await userEvent.type(screen.getByLabelText('Email'), 'Ann@Example.com');
+  // The username follows the name until it is edited, so replace the suggestion.
+  await userEvent.clear(screen.getByLabelText('Username'));
   await userEvent.type(screen.getByLabelText('Username'), 'Ann.Lee');
   await userEvent.selectOptions(screen.getByLabelText('Department'), 'g-eng');
   if (overrides.role) await userEvent.selectOptions(screen.getByLabelText('Role'), overrides.role);
@@ -588,7 +590,7 @@ describe('Onboard screen: error summary', () => {
     expect(screen.getByRole('group', { name: 'Who they are' })).toContainElement(
       screen.getByLabelText('First name'),
     );
-    expect(screen.getByRole('group', { name: 'Sign-in details' })).toContainElement(
+    expect(screen.getByRole('group', { name: 'Who they are' })).toContainElement(
       screen.getByLabelText('Username'),
     );
     expect(screen.getByRole('group', { name: 'Where they work' })).toContainElement(
@@ -750,6 +752,96 @@ describe('Onboard screen: summary and clearing', () => {
     expect(screen.getByLabelText('Department')).toHaveValue('');
     expect(
       within(screen.getByRole('complementary', { name: 'Summary' })).getByText('New employee'),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('Onboard screen: the username follows the name', () => {
+  it('suggests first.last as the names are typed', async () => {
+    setup();
+    renderWithProviders(<OnboardPage />);
+
+    await userEvent.type(await screen.findByLabelText('First name'), 'Ann');
+    expect(screen.getByLabelText('Username')).toHaveValue('ann');
+    await userEvent.type(screen.getByLabelText('Last name'), 'Lee');
+
+    expect(screen.getByLabelText('Username')).toHaveValue('ann.lee');
+  });
+
+  it('stops following the name once the admin has typed a username', async () => {
+    setup();
+    renderWithProviders(<OnboardPage />);
+    await userEvent.type(await screen.findByLabelText('First name'), 'Ann');
+    await userEvent.type(screen.getByLabelText('Username'), '.x');
+
+    await userEvent.type(screen.getByLabelText('Last name'), 'Lee');
+
+    expect(screen.getByLabelText('Username')).toHaveValue('ann.x');
+  });
+
+  it('starts following the name again after "Clear form"', async () => {
+    setup();
+    renderWithProviders(<OnboardPage />);
+    await userEvent.type(await screen.findByLabelText('First name'), 'Ann');
+    await userEvent.type(screen.getByLabelText('Username'), '.x');
+    await userEvent.click(screen.getByRole('button', { name: 'Clear form' }));
+
+    await userEvent.type(screen.getByLabelText('First name'), 'Bo');
+
+    expect(screen.getByLabelText('Username')).toHaveValue('bo');
+  });
+
+  it('sends the suggested username when the admin leaves it alone', async () => {
+    const api = setup({ onboardingCreate: async () => ok(complete(), 201) });
+    renderWithProviders(<OnboardPage />);
+    await userEvent.type(await screen.findByLabelText('First name'), 'Ann');
+    await userEvent.type(screen.getByLabelText('Last name'), 'Lee');
+    await userEvent.type(screen.getByLabelText('Email'), 'ann@example.com');
+    await userEvent.selectOptions(screen.getByLabelText('Department'), 'g-eng');
+
+    await submit();
+
+    await screen.findByText('Employee onboarded');
+    expect(api.api.onboarding.create).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'ann.lee' }),
+    );
+  });
+});
+
+describe('Onboard screen: help while filling in the form', () => {
+  it('checks a field when the admin leaves it, without waiting for Submit', async () => {
+    setup();
+    renderWithProviders(<OnboardPage />);
+    const email = await screen.findByLabelText('Email');
+
+    await userEvent.type(email, 'not-an-email');
+    expect(email).not.toHaveAttribute('aria-invalid');
+    await userEvent.tab();
+
+    await waitFor(() => expect(email).toHaveAttribute('aria-invalid', 'true'));
+  });
+
+  it('says how many required fields are left', async () => {
+    setup();
+    renderWithProviders(<OnboardPage />);
+
+    expect(await screen.findByText('5 required fields left')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('First name'), 'Ann');
+    // The name also fills in the username.
+    expect(screen.getByText('3 required fields left')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Last name'), 'Lee');
+    await userEvent.type(screen.getByLabelText('Email'), 'ann@example.com');
+    await userEvent.selectOptions(screen.getByLabelText('Department'), 'g-eng');
+
+    expect(screen.getByText('Everything required is filled in.')).toBeInTheDocument();
+  });
+
+  it('says that every field is required unless it is marked optional', async () => {
+    setup();
+    renderWithProviders(<OnboardPage />);
+
+    expect(
+      await screen.findByText('All fields are required unless marked optional.'),
     ).toBeInTheDocument();
   });
 });

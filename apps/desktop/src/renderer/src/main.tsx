@@ -5,7 +5,7 @@ import { RouterProvider } from 'react-router/dom';
 import { Toaster } from './components/toaster';
 import { initTheme } from './lib/theme';
 import { router } from './router';
-import '@fontsource-variable/inter';
+import '@fontsource-variable/roboto-flex';
 import './styles.css';
 
 initTheme();

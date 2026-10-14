@@ -62,7 +62,7 @@ async function fillPerson() {
   await userEvent.type(await screen.findByLabelText('First name'), 'Ann');
   await userEvent.type(screen.getByLabelText('Last name'), 'Lee');
   await userEvent.type(screen.getByLabelText('Email'), 'ann@example.com');
-  await userEvent.type(screen.getByLabelText('Username'), 'ann.lee');
+  // The username already follows the name ("ann.lee"), so there is nothing to type here.
   await userEvent.selectOptions(screen.getByLabelText('Department'), 'g-eng');
 }
 
@@ -70,8 +70,7 @@ const submit = () => userEvent.click(screen.getByRole('button', { name: 'Onboard
 
 async function chooseBoss() {
   await userEvent.type(await screen.findByLabelText('Search for a manager'), 'bea');
-  await userEvent.click(await screen.findByRole('radio', { name: /Bea Boss/ }));
-  await userEvent.click(screen.getByRole('button', { name: 'Use this person as manager' }));
+  await userEvent.click(await screen.findByRole('button', { name: /Bea Boss/ }));
 }
 
 describe('Onboard form: the start date', () => {
@@ -160,22 +159,22 @@ describe('Onboard form: choosing a manager', () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     expect(api.api.get).not.toHaveBeenCalledWith('/employees', expect.anything());
-    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'People who match your search' })).toBeNull();
   });
 
-  it('lists the matching people as radio buttons, and does not pick anyone just because the arrow keys moved', async () => {
+  it('lists the matching people as buttons, and does not pick anyone just because the keys moved', async () => {
     setup();
     renderWithProviders(<OnboardPage />);
     await userEvent.type(await screen.findByLabelText('Search for a manager'), 'bo');
 
-    const group = await screen.findByRole('group', { name: 'People who match your search' });
-    const radios = within(group).getAllByRole('radio');
-    expect(radios).toHaveLength(2);
-    radios[0]!.focus();
-    await userEvent.keyboard('{ArrowDown}');
+    const list = await screen.findByRole('list', { name: 'People who match your search' });
+    const people = within(list).getAllByRole('button');
+    expect(people).toHaveLength(2);
+    people[0]!.focus();
+    await userEvent.keyboard('{Tab}');
 
-    expect(screen.getByRole('button', { name: 'Use this person as manager' })).toBeDisabled();
     expect(screen.queryByText(/Remove .* as manager/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Search for a manager')).toBeInTheDocument();
   });
 
   it('shows a person with a disabled account but does not let them be chosen, and says why', async () => {
@@ -183,14 +182,15 @@ describe('Onboard form: choosing a manager', () => {
     renderWithProviders(<OnboardPage />);
     await userEvent.type(await screen.findByLabelText('Search for a manager'), 'gus');
 
-    const radio = await screen.findByRole('radio', { name: /Gus Gone/ });
+    const person = await screen.findByRole('button', { name: /Gus Gone/ });
+    await userEvent.click(person);
 
-    expect(radio).toBeDisabled();
+    expect(person).toBeDisabled();
     expect(screen.getByText(/account disabled, cannot be chosen/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Use this person as manager' })).toBeDisabled();
+    expect(screen.queryByText(/Remove .* as manager/)).not.toBeInTheDocument();
   });
 
-  it('chooses with a radio and the button, then shows the person with a Remove button', async () => {
+  it('chooses a person with one click, then shows them with a Remove button', async () => {
     setup();
     renderWithProviders(<OnboardPage />);
 
@@ -237,7 +237,7 @@ describe('Onboard form: choosing a manager', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
 
-    expect(await screen.findByRole('radio', { name: /Bea Boss/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Bea Boss/ })).toBeInTheDocument();
   });
 
   it('says only the first 20 are shown when there are more matches', async () => {

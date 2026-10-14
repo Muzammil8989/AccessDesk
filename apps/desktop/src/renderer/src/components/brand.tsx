@@ -7,11 +7,11 @@ export function BrandMark({ className }: { className?: string }) {
     <span
       aria-hidden="true"
       className={cn(
-        'flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs',
+        'flex size-10 shrink-0 items-center justify-center rounded-sm bg-primary text-on-primary',
         className,
       )}
     >
-      <LockKeyhole className="size-4" />
+      <LockKeyhole className="size-5" />
     </span>
   );
 }

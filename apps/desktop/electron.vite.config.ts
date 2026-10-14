@@ -13,5 +13,10 @@ export default defineConfig({
       alias: { '@': resolve(__dirname, 'src/renderer/src') },
     },
     plugins: [react(), tailwindcss()],
+    build: {
+      // Smaller scripts parse and compile faster, which is most of the start-up cost on a slow CPU.
+      minify: 'esbuild',
+      cssMinify: true,
+    },
   },
 });

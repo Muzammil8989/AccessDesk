@@ -40,7 +40,7 @@ export function ChecklistDetailPage() {
         }
       />
       {detail?.startDate && (
-        <p className="text-sm text-muted-foreground">{START_DATE_NOTE_SAVED}</p>
+        <p className="text-body-medium text-on-surface-variant">{START_DATE_NOTE_SAVED}</p>
       )}
       <ChecklistPanel subjectId={subjectId} />
     </div>

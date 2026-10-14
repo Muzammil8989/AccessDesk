@@ -58,7 +58,16 @@ const groups = [
   { id: 'g-sales', name: 'Sales', path: '/Sales' },
 ];
 const roles = new Map(
-  ['member', 'manager', 'admin', 'developer'].map((name) => [name, { id: randomUUID(), name }]),
+  [
+    'member',
+    'manager',
+    'admin',
+    'developer',
+    // The roles a realm creates for itself, which the Employees filters must not offer.
+    'offline_access',
+    'uma_authorization',
+    'default-roles-company-platform',
+  ].map((name) => [name, { id: randomUUID(), name }]),
 );
 const memberships = new Map();
 const roleMappings = new Map();
@@ -82,6 +91,31 @@ const users = Array.from({ length: 25 }, (_, i) => {
     createdTimestamp: 1_700_000_000_000 + i * 86_400_000,
   };
 });
+
+// Who is in which group and holds which role, for the Employees filters. Indexes are positions
+// in `users`; the users at 6, 13 and 20 are disabled.
+const SEEDED_GROUPS = { 'g-eng': [0, 10], 'g-sales': [10, 15] };
+const SEEDED_ROLES = { developer: [0, 4], manager: [5, 8] };
+for (const [groupId, [from, to]] of Object.entries(SEEDED_GROUPS)) {
+  for (const user of users.slice(from, to)) {
+    memberships.set(user.id, (memberships.get(user.id) ?? new Set()).add(groupId));
+  }
+}
+for (const [role, [from, to]] of Object.entries(SEEDED_ROLES)) {
+  for (const user of users.slice(from, to)) {
+    roleMappings.set(user.id, (roleMappings.get(user.id) ?? new Set()).add(role));
+  }
+}
+
+// The identity provider's default search: a case-insensitive prefix of username, email, first or last name.
+const matchesSearch = (user, search) =>
+  !search ||
+  [user.username, user.email, user.firstName, user.lastName].some((field) =>
+    String(field ?? '')
+      .toLowerCase()
+      .startsWith(search),
+  );
+const matchesEnabled = (user, enabled) => enabled === null || user.enabled === (enabled === 'true');
 
 async function issueTokens() {
   const access = await new jose.SignJWT({
@@ -195,6 +229,18 @@ const idp = createServer(async (req, res) => {
         ? sendJson(res, 200, roles.get(id))
         : sendJson(res, 404, { errorMessage: 'Role not found' });
     }
+    if (collection === 'groups' && id && sub === 'members' && req.method === 'GET') {
+      if (!groups.some((g) => g.id === id)) {
+        return sendJson(res, 404, { errorMessage: 'Could not find group' });
+      }
+      const members = users.filter((u) => memberships.get(u.id)?.has(id));
+      return sendJson(res, 200, members.slice(first, first + max));
+    }
+    if (collection === 'roles' && id && sub === 'users' && req.method === 'GET') {
+      if (!roles.has(id)) return sendJson(res, 404, { errorMessage: 'Could not find role' });
+      const holders = users.filter((u) => roleMappings.get(u.id)?.has(id));
+      return sendJson(res, 200, holders.slice(first, first + max));
+    }
     if (collection !== 'users') return sendJson(res, 404, { error: 'not found' });
 
     if (!id && req.method === 'POST') {
@@ -231,7 +277,8 @@ const idp = createServer(async (req, res) => {
           : Boolean(value?.toLowerCase().includes(wanted.toLowerCase())));
       const found = users.filter(
         (u) =>
-          (!search || JSON.stringify(u).toLowerCase().includes(search)) &&
+          matchesSearch(u, search) &&
+          matchesEnabled(u, url.searchParams.get('enabled')) &&
           field(u.username, url.searchParams.get('username')) &&
           field(u.email, url.searchParams.get('email')),
       );
@@ -242,7 +289,9 @@ const idp = createServer(async (req, res) => {
       return sendJson(
         res,
         200,
-        users.filter((u) => !search || JSON.stringify(u).toLowerCase().includes(search)).length,
+        users.filter(
+          (u) => matchesSearch(u, search) && matchesEnabled(u, url.searchParams.get('enabled')),
+        ).length,
       );
     }
 
@@ -470,6 +519,11 @@ try {
     `calls=${stats.adminCalls}`,
   );
   await win.screenshot({ path: path.join(SHOTS, '3-employees.png') });
+  // The same screen in the dark theme, for a look at the M3 dark colours.
+  await win.evaluate(() => document.documentElement.classList.add('dark'));
+  await win.waitForTimeout(400); // let the colour transitions finish
+  await win.screenshot({ path: path.join(SHOTS, '3c-employees-dark.png') });
+  await win.evaluate(() => document.documentElement.classList.remove('dark'));
 
   await win.getByRole('button', { name: 'Next' }).click();
   await win.getByText('Showing 21–25 of 25').waitFor({ timeout: 10000 });
@@ -480,6 +534,78 @@ try {
   await win.getByLabel('Search employees').fill('zzzz');
   await win.getByText(/No employees match/).waitFor({ timeout: 10000 });
   check('empty state works', true);
+
+  // Filters. The mock has 25 people, 3 of them disabled; Engineering has 10 (1 disabled),
+  // Sales has 5 (1 disabled), developer has 4 and manager has 3.
+  await win.getByLabel('Search employees').fill('');
+  await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 10000 });
+  // Status is a radio group of three labelled choices: click the label of the one to pick.
+  const chooseStatus = (label) =>
+    win.getByRole('radiogroup', { name: 'Status' }).getByText(label, { exact: true }).click();
+  await chooseStatus('Disabled');
+  await win.getByText('Showing 1–3 of 3').waitFor({ timeout: 10000 });
+  check('the Disabled filter lists exactly the 3 disabled people', true);
+  check(
+    'every row in the Disabled list says Disabled',
+    (await win.getByRole('table').getByText('Disabled', { exact: true }).count()) === 3,
+  );
+  await chooseStatus('Active');
+  await win.getByText('Showing 1–20 of 22').waitFor({ timeout: 10000 });
+  check('the Active filter counts the other 22', true);
+  check(
+    'an applied filter shows as a chip',
+    await win
+      .getByRole('list', { name: 'Applied filters' })
+      .getByText('Status: Active')
+      .isVisible(),
+  );
+  await chooseStatus('All');
+  await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 10000 });
+
+  const groupFilter = win.getByLabel('Group', { exact: true });
+  const roleFilter = win.getByLabel('Role', { exact: true });
+  await win.waitForFunction(() => !document.querySelector('#employee-group')?.disabled, null, {
+    timeout: 10000,
+  });
+  check(
+    'the role filter offers the realm roles and hides the built-in ones',
+    JSON.stringify(await roleFilter.locator('option').allTextContents()) ===
+      JSON.stringify(['Any role', 'admin', 'developer', 'manager', 'member']),
+    (await roleFilter.locator('option').allTextContents()).join(','),
+  );
+  await groupFilter.selectOption({ label: 'Engineering' });
+  await win.getByText('Showing 1–10 of 10').waitFor({ timeout: 10000 });
+  check('the Engineering group lists its 10 direct members', true);
+  await chooseStatus('Disabled');
+  await win.getByText('Showing 1–1 of 1').waitFor({ timeout: 10000 });
+  check('a group filter combines with the status filter', true);
+  await win.getByLabel('Search employees').fill('user07');
+  await win.getByText('Showing 1–1 of 1').waitFor({ timeout: 10000 });
+  await win.getByLabel('Search employees').fill('ann');
+  await win.getByText('0 results').waitFor({ timeout: 10000 });
+  check('a group filter combines with search, and a count of 0 is announced', true);
+  await win.getByLabel('Search employees').fill('');
+  await chooseStatus('All');
+  await win.getByText('Showing 1–10 of 10').waitFor({ timeout: 10000 });
+  check('choosing a group switches the role filter off', await roleFilter.isDisabled());
+
+  await groupFilter.selectOption({ label: 'Any group' });
+  await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 10000 });
+  await roleFilter.selectOption({ label: 'developer' });
+  await win.getByText('Showing 1–4 of 4').waitFor({ timeout: 10000 });
+  check(
+    'choosing a role lists its 4 holders and switches the group filter off',
+    (await groupFilter.inputValue()) === '' && (await groupFilter.isDisabled()),
+  );
+  // All four developers are enabled, so developer + Disabled finds nobody. (The seeded manager
+  // range includes the disabled user at index 6, so manager would not be empty.)
+  await chooseStatus('Disabled');
+  await win.getByText('No employees match these filters.').waitFor({ timeout: 10000 });
+  check('a filter that finds nobody says so, with a way out', true);
+  await win.screenshot({ path: path.join(SHOTS, '3b-employees-filtered.png') });
+  await win.getByRole('button', { name: 'Clear search and filters' }).click();
+  await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 10000 });
+  check('clearing the filters brings everyone back', true);
 
   for (const name of ['Offboard', 'Access Review', 'Audit Log']) {
     await win.getByRole('link', { name }).click();
@@ -516,7 +642,8 @@ try {
   await win.getByText('Showing 1–20 of 25').waitFor({ timeout: 15000 });
   check('session survives an app restart without signing in again', true);
 
-  await win.getByRole('link', { name: 'Onboard' }).click();
+  // The Employees screen also has an "Onboard employee" link, so match the sidebar one exactly.
+  await win.getByRole('link', { name: 'Onboard', exact: true }).click();
   await win.getByRole('heading', { name: 'Onboard' }).waitFor({ timeout: 5000 });
   await win.getByLabel('First name').waitFor({ timeout: 10000 });
   check(
@@ -530,9 +657,15 @@ try {
     'owner role is never offered',
     (await win.getByLabel('Role').locator('option', { hasText: 'Owner' }).count()) === 0,
   );
+  await win.screenshot({ path: path.join(SHOTS, '5b-onboard-form.png') });
   await win.getByRole('button', { name: 'Onboard employee' }).click();
   await win.getByText('Enter a first name').waitFor({ timeout: 5000 });
   check('onboard form explains missing fields in plain language', true);
+  await win.screenshot({ path: path.join(SHOTS, '5c-onboard-errors.png') });
+  await win.evaluate(() => document.documentElement.classList.add('dark'));
+  await win.waitForTimeout(400);
+  await win.screenshot({ path: path.join(SHOTS, '5d-onboard-errors-dark.png') });
+  await win.evaluate(() => document.documentElement.classList.remove('dark'));
 
   const fillOnboardForm = async (username, email) => {
     await win.getByLabel('First name').fill('Nina');
@@ -588,8 +721,8 @@ try {
   // Copy needs the one clipboard-write permission the app grants. Read the real system clipboard
   // from the main process; never print its content.
   await app.evaluate(({ clipboard }) => clipboard.writeText('stale clipboard text'));
-  await win.getByRole('button', { name: 'Copy' }).click();
-  await win.getByRole('button', { name: 'Copied' }).waitFor({ timeout: 5000 });
+  await win.getByRole('button', { name: 'Copy', exact: true }).click();
+  await win.getByRole('button', { name: 'Copied', exact: true }).waitFor({ timeout: 5000 });
   check(
     'Copy puts the one-time password on the system clipboard',
     (await app.evaluate(({ clipboard }) => clipboard.readText())) === onboardedPassword,
@@ -723,6 +856,8 @@ try {
             .join('|') === 'member|developer' &&
           onboarding.groupPuts.filter((g) => g.userId === tina.id).length === 1,
       );
+      // When everything worked the steps start closed; open them to read the list.
+      await win.getByText('Steps', { exact: true }).click();
       check(
         'the result lists the template role step and the checklist step as done',
         (await win.getByText('Assign the template role').isVisible()) &&

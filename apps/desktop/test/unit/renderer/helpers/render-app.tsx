@@ -63,6 +63,8 @@ export interface FakeApiOptions {
   settings?: AppSettings | null;
   auth?: AuthStatus;
   apiGet?: (path: string, query?: Record<string, string | number>) => Promise<ApiResponse>;
+  // The answer for GET /employees/filter-options, which every Employees screen asks for.
+  filterOptions?: ApiResponse;
   onboardingCreate?: (input: unknown) => Promise<ApiResponse>;
   onboardingRetry?: (subjectId: string, input: unknown) => Promise<ApiResponse>;
   checklistSetItem?: (subjectId: string, itemId: string, input: unknown) => Promise<ApiResponse>;
@@ -71,6 +73,21 @@ export interface FakeApiOptions {
   saveSettings?: (input: unknown) => Promise<SettingsSaveResult>;
   testConnection?: (input: unknown) => Promise<ConnectionTestResult>;
 }
+
+export const filterOptions = {
+  groups: [
+    { id: 'group-eng', name: 'Engineering' },
+    { id: 'group-sales', name: 'Sales' },
+  ],
+  roles: [{ name: 'developer' }, { name: 'manager' }],
+};
+
+const filterOptionsResponse: ApiResponse = { ok: true, status: 200, data: filterOptions };
+const notSetUp = async (): Promise<ApiResponse> => ({
+  ok: false,
+  status: 404,
+  message: 'not set up',
+});
 
 export function installFakeApi(options: FakeApiOptions = {}) {
   let auth = options.auth ?? adminAuth;
@@ -95,9 +112,10 @@ export function installFakeApi(options: FakeApiOptions = {}) {
       }),
     },
     api: {
-      get: vi.fn(
-        options.apiGet ??
-          (async (): Promise<ApiResponse> => ({ ok: false, status: 404, message: 'not set up' })),
+      get: vi.fn(async (path: string, query?: Record<string, string | number>) =>
+        path === '/employees/filter-options'
+          ? (options.filterOptions ?? filterOptionsResponse)
+          : (options.apiGet ?? notSetUp)(path, query),
       ),
       onboarding: {
         create: vi.fn(

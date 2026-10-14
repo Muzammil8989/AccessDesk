@@ -74,9 +74,10 @@ describe('app shell', () => {
     expect(screen.getByRole('link', { name: 'Offboard' })).not.toHaveAttribute('title');
     // The tooltip trigger once turned the link's class function into text, unstyling it.
     expect(screen.getByRole('link', { name: 'Employees' }).className).not.toMatch(/=>|isActive/);
+    // The open screen is marked with the M3 navigation pill.
     expect(screen.getByRole('link', { name: 'Onboard' })).toHaveClass(
-      'rounded-lg',
-      'bg-primary/10',
+      'rounded-full',
+      'bg-secondary-container',
     );
 
     await user.hover(screen.getByRole('link', { name: 'Offboard' }));

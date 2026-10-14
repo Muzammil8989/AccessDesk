@@ -32,12 +32,8 @@ export function NoAccessPage() {
     <div className="grid min-h-screen place-items-center p-6">
       <Card className="w-full max-w-lg">
         <CardHeader>
-          <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-destructive/15 text-destructive">
-            <ShieldAlert className="size-5" aria-hidden="true" />
-          </div>
-          <CardTitle as="h1" className="text-xl">
-            You don't have access to AccessDesk
-          </CardTitle>
+          <ShieldAlert className="mb-2 size-10 text-error" aria-hidden="true" />
+          <CardTitle as="h1">You don't have access to AccessDesk</CardTitle>
           <CardDescription>
             You are signed in as <strong>{user.displayName ?? user.username}</strong>, but this
             account has no AccessDesk role. Ask an administrator of your identity provider to give
@@ -51,10 +47,10 @@ export function NoAccessPage() {
             .
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-5 text-sm">
+        <CardContent className="flex flex-col gap-5 text-body-medium">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground">Roles in your sign-in: </span>
-            {roles.length === 0 && <span className="text-muted-foreground">none</span>}
+            <span className="text-on-surface-variant">Roles in your sign-in: </span>
+            {roles.length === 0 && <span className="text-on-surface-variant">none</span>}
             {roles.map((role) => (
               <Badge key={role} variant="secondary">
                 {role}
@@ -62,11 +58,11 @@ export function NoAccessPage() {
             ))}
           </div>
 
-          <details className="rounded-lg border p-3">
-            <summary className="cursor-pointer font-medium">
+          <details className="rounded-md border border-outline-variant p-3">
+            <summary className="cursor-pointer text-label-large">
               Role assigned but still no access?
             </summary>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-on-surface-variant">
               <li>The role must have exactly that name.</li>
               <li>It can be assigned to the user, or to a group or composite role they have.</li>
               <li>The client's scopes must let roles into the access token.</li>
@@ -80,7 +76,7 @@ export function NoAccessPage() {
             </Button>
             <Link
               to="/setup"
-              className="text-sm text-muted-foreground underline underline-offset-4"
+              className="text-body-medium text-on-surface-variant underline underline-offset-4"
             >
               Change connection settings
             </Link>

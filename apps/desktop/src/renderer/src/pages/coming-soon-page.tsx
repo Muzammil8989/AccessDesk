@@ -16,16 +16,13 @@ export function ComingSoonPage({
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title={title} description={description} />
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed bg-card px-6 py-16 text-center">
-        <span
-          aria-hidden="true"
-          className="flex size-12 items-center justify-center rounded-full bg-accent text-accent-foreground"
-        >
-          <Icon className="size-6" />
-        </span>
-        <p className="text-base font-semibold">Coming soon</p>
-        <p className="max-w-md text-sm text-muted-foreground">This screen is not built yet.</p>
-        <Button asChild variant="outline" size="sm" className="mt-2">
+      <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-outline px-6 py-16 text-center">
+        <Icon className="size-12 text-on-surface-variant" aria-hidden="true" />
+        <p className="text-title-medium">Coming soon</p>
+        <p className="max-w-md text-body-medium text-on-surface-variant">
+          This screen is not built yet.
+        </p>
+        <Button asChild variant="outline" className="mt-2">
           <Link to="/employees">Back to the employee list</Link>
         </Button>
       </div>

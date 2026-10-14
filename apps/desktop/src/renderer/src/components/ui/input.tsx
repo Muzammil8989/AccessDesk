@@ -1,14 +1,13 @@
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
 
+/** A bare input. Wrap it in a FieldShell (text fields) or use SearchField (search). */
 export function Input({ className, type, ...props }: ComponentProps<'input'>) {
   return (
     <input
       type={type}
       className={cn(
-        'h-10 w-full min-w-0 rounded-md border border-input bg-card px-3 py-1 text-base shadow-xs transition-colors duration-150 ease-standard outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 md:text-sm',
-        'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30',
-        'aria-invalid:border-destructive aria-invalid:ring-destructive/20',
+        'w-full min-w-0 bg-transparent text-body-large text-on-surface outline-none placeholder:text-on-surface-variant disabled:cursor-not-allowed disabled:opacity-60',
         className,
       )}
       {...props}

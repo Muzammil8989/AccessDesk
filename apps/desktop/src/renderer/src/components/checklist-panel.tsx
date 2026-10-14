@@ -1,22 +1,20 @@
 import type { ChecklistDetail } from '@accessdesk/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleCheck } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useReauthOn401 } from '@/hooks/use-reauth-on-401';
 import { ApiRequestError } from '@/lib/api';
+import { taskCount } from '@/lib/format';
 import { checklistDetailQuery, setChecklistClosed, setChecklistItem } from '@/lib/checklists-api';
-import { authQuery } from '@/lib/session';
-import { cn } from '@/lib/utils';
 
 const progressOf = (detail: ChecklistDetail) => {
   const done = detail.items.filter((item) => item.status === 'done').length;
   return { done, total: detail.items.length };
 };
-
-const taskCount = (count: number) => `${count} ${count === 1 ? 'task' : 'tasks'}`;
 
 interface ChecklistPanelProps {
   subjectId: string;
@@ -66,17 +64,14 @@ export function ChecklistPanel({ subjectId, headingLevel = 2 }: ChecklistPanelPr
     },
   });
 
-  const failure = checklist.error ?? toggle.error ?? close.error;
-  const status = failure instanceof ApiRequestError ? failure.status : null;
-  useEffect(() => {
-    if (status === 401) void queryClient.invalidateQueries({ queryKey: authQuery.queryKey });
-  }, [status, queryClient]);
+  useReauthOn401(checklist.error ?? toggle.error ?? close.error);
+  const saving = toggle.isPending || close.isPending;
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <Heading
         id={headingId}
-        className={cn('font-semibold', headingLevel === 2 ? 'text-lg' : 'text-sm')}
+        className={headingLevel === 2 ? 'text-title-large' : 'text-title-small'}
       >
         Checklist for the new employee
       </Heading>
@@ -106,22 +101,28 @@ export function ChecklistPanel({ subjectId, headingLevel = 2 }: ChecklistPanelPr
         </Alert>
       )}
 
-      {checklist.data && (
-        <ChecklistTasks
-          detail={checklist.data}
-          saving={toggle.isPending || close.isPending}
-          onChange={(itemId, done) => {
-            if (toggle.isPending) return;
-            setAnnouncement('');
-            toggle.mutate({ subjectId, itemId, done });
-          }}
-          onClose={(closed) => {
-            if (close.isPending) return;
-            setAnnouncement('');
-            close.mutate({ subjectId, closed });
-          }}
-        />
-      )}
+      {checklist.data &&
+        (checklist.data.items.length === 0 ? (
+          <EmptyChecklist
+            detail={checklist.data}
+            saving={saving}
+            onClose={(closed) => {
+              if (close.isPending) return;
+              setAnnouncement('');
+              close.mutate({ subjectId, closed });
+            }}
+          />
+        ) : (
+          <TaskList
+            detail={checklist.data}
+            saving={saving}
+            onChange={(itemId, done) => {
+              if (toggle.isPending) return;
+              setAnnouncement('');
+              toggle.mutate({ subjectId, itemId, done });
+            }}
+          />
+        ))}
 
       {(toggle.isError || close.isError) && (
         <Alert variant="destructive" role="alert">
@@ -142,49 +143,55 @@ export function ChecklistPanel({ subjectId, headingLevel = 2 }: ChecklistPanelPr
   );
 }
 
-function ChecklistTasks({
+/** A checklist with no tasks has nothing to tick, so the admin closes it by hand. */
+function EmptyChecklist({
   detail,
   saving,
-  onChange,
   onClose,
 }: {
   detail: ChecklistDetail;
   saving: boolean;
-  onChange: (itemId: string, done: boolean) => void;
   onClose: (closed: boolean) => void;
 }) {
-  const { done, total } = progressOf(detail);
-
-  if (total === 0) {
-    const closed = detail.status === 'done';
-    return (
-      <div className="flex flex-col gap-3" aria-busy={saving}>
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <span>This checklist has no tasks.</span>
-          {closed && (
-            <Badge variant="success">
-              <CircleCheck aria-hidden="true" />
-              Marked as done
-            </Badge>
-          )}
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {closed
-            ? 'It is in the Done list. Reopen it to put it back in the Open list.'
-            : 'It stays in the Open list until you mark it as done.'}
-        </p>
-        <div>
-          <Button type="button" variant="outline" onClick={() => onClose(!closed)}>
-            {closed ? 'Reopen checklist' : 'Mark as done'}
-          </Button>
-        </div>
+  const closed = detail.status === 'done';
+  return (
+    <div className="flex flex-col gap-3" aria-busy={saving}>
+      <div className="flex flex-wrap items-center gap-2 text-body-medium text-on-surface-variant">
+        <span>This checklist has no tasks.</span>
+        {closed && (
+          <Badge variant="success">
+            <CircleCheck aria-hidden="true" />
+            Marked as done
+          </Badge>
+        )}
       </div>
-    );
-  }
+      <p className="text-body-medium text-on-surface-variant">
+        {closed
+          ? 'It is in the Done list. Reopen it to put it back in the Open list.'
+          : 'It stays in the Open list until you mark it as done.'}
+      </p>
+      <div>
+        <Button type="button" variant="outline" onClick={() => onClose(!closed)}>
+          {closed ? 'Reopen checklist' : 'Mark as done'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
+function TaskList({
+  detail,
+  saving,
+  onChange,
+}: {
+  detail: ChecklistDetail;
+  saving: boolean;
+  onChange: (itemId: string, done: boolean) => void;
+}) {
+  const { done, total } = progressOf(detail);
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2 text-body-medium text-on-surface-variant">
         <span>
           {done} of {taskCount(total)} done
         </span>
@@ -202,11 +209,14 @@ function ChecklistTasks({
             const inputId = `task-${item.id}`;
             const descriptionId = `${inputId}-description`;
             return (
-              <li key={item.id} className="rounded-lg border text-sm">
+              <li
+                key={item.id}
+                className="rounded-md border border-outline-variant text-body-medium"
+              >
                 {/* The whole row is the label, so the pointer target is well over 40px. */}
                 <label
                   htmlFor={inputId}
-                  className="flex min-h-10 cursor-pointer items-start gap-3 px-4 py-3"
+                  className="state-layer flex min-h-10 cursor-pointer items-start gap-3 rounded-md px-4 py-3"
                 >
                   <input
                     id={inputId}
@@ -214,12 +224,12 @@ function ChecklistTasks({
                     checked={item.status === 'done'}
                     onChange={(event) => onChange(item.id, event.target.checked)}
                     aria-describedby={item.description ? descriptionId : undefined}
-                    className="mt-0.5 size-4 shrink-0 cursor-pointer accent-primary focus-visible:ring-2 focus-visible:ring-ring"
+                    className="mt-0.5 size-[18px] shrink-0 cursor-pointer accent-primary focus-visible:ring-2 focus-visible:ring-primary"
                   />
-                  <span className="font-medium">{item.title}</span>
+                  <span className="text-label-large">{item.title}</span>
                 </label>
                 {item.description && (
-                  <p id={descriptionId} className="px-4 pb-3 pl-11 text-muted-foreground">
+                  <p id={descriptionId} className="px-4 pb-3 pl-11 text-on-surface-variant">
                     {item.description}
                   </p>
                 )}

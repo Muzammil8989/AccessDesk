@@ -303,13 +303,17 @@ functions exist and are tested, but no API route uses them yet.
   layout `/employees`, `/onboard`, `/onboard/checklists`, `/onboard/checklists/:subjectId`, `/offboard`,
   `/access-review`, `/audit-log`, `/settings`. The checklist screens use the existing `onboard` feature.
   Employees, Onboard (with its checklist screens) and Settings do real work, the rest are placeholders.
-  Employees has debounced search, pagination, loading, empty and error states, and retries only network
-  and 5xx errors; its query (`lib/employees-api.ts`) is reused by the manager picker. The settings form
+  Employees has debounced search, a Status control, group and role filters (a group and a role cannot be
+  combined, so choosing one switches the other off) with removable chips for what is applied,
+  pagination, loading, empty and error states, and an "Onboard employee" button; it retries only
+  network and 5xx errors; its query (`lib/employees-api.ts`) is reused by the manager picker. The settings form
   (Issuer URL, Client ID, AccessDesk API URL; no realm field) is validated with Zod and has a "Test
   connection" button, and the settings page card is titled "Identity provider connection". The login
   button says "Sign in". API responses are validated against the shared schemas, and a bad shape becomes
   a plain message, never raw validation output.
-- **Look and feel** (see `design-system/accessdesk/MASTER.md`). A Light, Dark or System theme
+- **Look and feel** (see `design-system/accessdesk/MASTER.md`). Material Design 3: M3 colour roles and
+  type scale (Roboto Flex, bundled), pill buttons, filled text fields with floating labels, tonal cards,
+  state layers, and icons drawn without a background. A Light, Dark or System theme
   (`lib/theme.ts`, saved in `localStorage`, the `.dark` class on `<html>`), a sidebar that collapses
   (automatically on narrow windows, or by hand with its header button or `Ctrl+B`, remembered in
   `localStorage`; collapsed icons get Radix tooltips, never `title`), toast messages (`lib/toast.ts`, errors stay until
@@ -320,13 +324,16 @@ functions exist and are tested, but no API route uses them yet.
   `GET /onboarding/options` and the templates from `GET /templates`. Choosing a template fills in the
   department and role, says so in a status message and lists in plain words what the template will also
   do. A template with a role the person may not assign is disabled with the reason (the API enforces it).
-  The role options use the same shared rule (`roleViolation`). The manager is chosen with a search, a
-  native radio group (arrow keys do not pick anyone) and a confirm button; a disabled account is listed
-  but cannot be chosen. The start date field always says: "Information only. The account is created and
-  enabled now. It does not unlock on this date." A complete result shows the one-time temporary
-  password with a Copy button and a reminder that it is shown once, then the checklist (native
-  checkboxes, polite announcements; a checklist with no tasks offers "Mark as done"). A partial result
-  lists each step and offers Retry. The password lives only in component state and is cleared when the
+  The role options use the same shared rule (`roleViolation`). The form has three cards in task order
+  (template, who they are, where they work), validates a field when it is left, and suggests the
+  username as `first.last` (`lib/username.ts`) until the admin types one. The manager is chosen with a
+  search and one click on a person; the chosen person is shown with a Remove button, which is the undo.
+  A disabled account is listed but cannot be chosen. The start date field always says: "Information
+  only. The account is created and enabled now. It does not unlock on this date." A complete result
+  shows the one-time temporary password with Copy and "Copy sign-in details" buttons and a reminder
+  that it is shown once, then the checklist (native checkboxes, polite announcements; a checklist with
+  no tasks offers "Mark as done"), and the steps, closed unless one did not finish. A partial result
+  opens the steps and offers Retry. Both offer "View in Employees". The password lives only in component state and is cleared when the
   admin leaves the page. If the response to a create is lost, the screen tells the admin to check the
   Employees list.
 - **Checklist screens.** `/onboard/checklists` has an Open/Done radio filter, a table of 20 per page with

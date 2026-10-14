@@ -49,14 +49,14 @@ export function TooltipContent({
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          'z-50 flex max-w-xs items-center gap-2 rounded-md bg-tooltip px-2.5 py-1.5 text-xs font-medium text-tooltip-foreground shadow-md',
-          'animate-in fade-in-0 zoom-in-95 duration-150 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
+          // An M3 plain tooltip: inverse surface, 4px radius, body-small, no arrow.
+          'z-50 flex max-w-xs items-center gap-2 rounded-xs bg-inverse-surface px-2 py-1 text-body-small text-inverse-on-surface',
+          'animate-in fade-in-0 duration-150 data-[state=closed]:animate-out data-[state=closed]:fade-out-0',
           className,
         )}
         {...props}
       >
         {children}
-        <TooltipPrimitive.Arrow className="fill-tooltip" width={10} height={5} />
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   );
@@ -67,7 +67,7 @@ export function TooltipKbd({ children }: { children: ReactNode }) {
   return (
     <kbd
       aria-hidden="true"
-      className="rounded border border-tooltip-foreground/20 px-1.5 font-sans text-[11px] text-tooltip-foreground/80"
+      className="rounded-xs border border-inverse-on-surface/30 px-1.5 font-sans text-label-small text-inverse-on-surface/80"
     >
       {children}
     </kbd>

@@ -1,21 +1,37 @@
 import type { Feature } from '@accessdesk/shared';
 import { ScrollText, ShieldCheck, UserMinus } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { lazy, type ReactNode } from 'react';
 import { createHashRouter, Navigate, type RouteObject } from 'react-router';
 import { AppLayout } from '@/components/app-layout';
+import { PageTransition } from '@/components/page-transition';
 import { RequireFeature } from '@/components/require-feature';
-import { ChecklistDetailPage } from '@/pages/checklist-detail-page';
-import { ChecklistsPage } from '@/pages/checklists-page';
 import { ComingSoonPage } from '@/pages/coming-soon-page';
-import { EmployeesPage } from '@/pages/employees-page';
 import { LoginPage } from '@/pages/login-page';
 import { NoAccessPage } from '@/pages/no-access-page';
-import { OnboardPage } from '@/pages/onboard-page';
-import { SettingsPage } from '@/pages/settings-page';
 import { SetupPage } from '@/pages/setup-page';
 
+// The screens inside the signed-in shell load on demand, so the sign-in path does not pay for the
+// onboarding form (react-hook-form + zod). AppLayout owns the Suspense boundary around them.
+const ChecklistDetailPage = lazy(() =>
+  import('@/pages/checklist-detail-page').then((m) => ({ default: m.ChecklistDetailPage })),
+);
+const ChecklistsPage = lazy(() =>
+  import('@/pages/checklists-page').then((m) => ({ default: m.ChecklistsPage })),
+);
+const EmployeesPage = lazy(() =>
+  import('@/pages/employees-page').then((m) => ({ default: m.EmployeesPage })),
+);
+const OnboardPage = lazy(() =>
+  import('@/pages/onboard-page').then((m) => ({ default: m.OnboardPage })),
+);
+const SettingsPage = lazy(() =>
+  import('@/pages/settings-page').then((m) => ({ default: m.SettingsPage })),
+);
+
 const guarded = (feature: Feature, page: ReactNode) => (
-  <RequireFeature feature={feature}>{page}</RequireFeature>
+  <RequireFeature feature={feature}>
+    <PageTransition>{page}</PageTransition>
+  </RequireFeature>
 );
 
 export const routes: RouteObject[] = [

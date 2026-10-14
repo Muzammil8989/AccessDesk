@@ -29,9 +29,7 @@ export function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <BrandMark className="mb-2 size-10" />
-          <CardTitle as="h1" className="text-xl">
-            Sign in to AccessDesk
-          </CardTitle>
+          <CardTitle as="h1">Sign in to AccessDesk</CardTitle>
           <CardDescription>
             You will sign in with your company account in your web browser.
           </CardDescription>
@@ -39,7 +37,7 @@ export function LoginPage() {
         <CardContent className="flex flex-col gap-4">
           {login.isPending ? (
             <>
-              <p role="status" className="text-sm text-muted-foreground">
+              <p role="status" className="text-body-medium text-on-surface-variant">
                 Waiting for you to finish signing in in your browser…
               </p>
               <Button variant="outline" onClick={() => void window.accessdesk.auth.cancelLogin()}>
@@ -50,16 +48,19 @@ export function LoginPage() {
             <Button onClick={() => login.mutate()}>Sign in</Button>
           )}
           {failure && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-body-medium text-error">
               {failure}
             </p>
           )}
           {login.isError && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-body-medium text-error">
               Sign-in failed unexpectedly. Try again.
             </p>
           )}
-          <Link to="/setup" className="text-sm text-muted-foreground underline underline-offset-4">
+          <Link
+            to="/setup"
+            className="text-body-medium text-on-surface-variant underline underline-offset-4"
+          >
             Change connection settings
           </Link>
         </CardContent>

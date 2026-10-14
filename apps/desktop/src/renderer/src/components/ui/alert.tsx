@@ -3,14 +3,14 @@ import { CircleAlert, CircleCheck, Info, TriangleAlert, type LucideIcon } from '
 import type { ComponentProps, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
-const alertVariants = cva('flex items-start gap-3 rounded-lg border p-4 text-sm', {
+/** An M3 banner: a container colour, 12px radius, no outline. The icon has no background. */
+const alertVariants = cva('flex items-start gap-3 rounded-md p-4 text-body-medium', {
   variants: {
     variant: {
-      info: 'border-info/30 bg-info/10 [&>svg]:text-info',
-      success: 'border-success/30 bg-success/10 [&>svg]:text-success',
-      warning: 'border-warning/40 bg-warning/10 [&>svg]:text-warning',
-      destructive:
-        'border-destructive/40 bg-destructive/10 [&>svg]:text-destructive [&_[data-slot=alert-title]]:text-destructive',
+      info: 'bg-info-container text-on-info-container',
+      success: 'bg-success-container text-on-success-container',
+      warning: 'bg-warning-container text-on-warning-container',
+      destructive: 'bg-error-container text-on-error-container',
     },
   },
   defaultVariants: { variant: 'info' },
@@ -40,16 +40,16 @@ export function Alert({
   const Icon = ICONS[variant ?? 'info'];
   return (
     <div className={cn(alertVariants({ variant }), className)} {...props}>
-      {icon ?? <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />}
+      {icon ?? <Icon className="mt-0.5 size-5 shrink-0" aria-hidden="true" />}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }
 
 export function AlertTitle({ className, ...props }: ComponentProps<'p'>) {
-  return <p data-slot="alert-title" className={cn('font-medium', className)} {...props} />;
+  return <p data-slot="alert-title" className={cn('text-title-small', className)} {...props} />;
 }
 
 export function AlertDescription({ className, ...props }: ComponentProps<'div'>) {
-  return <div className={cn('mt-1 text-muted-foreground', className)} {...props} />;
+  return <div className={cn('mt-1', className)} {...props} />;
 }

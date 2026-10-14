@@ -10,8 +10,8 @@ const OPTIONS: { value: Theme; label: string; icon: LucideIcon }[] = [
 ];
 
 /**
- * Light / Dark / System. `compact` collapses it to one button that cycles through the
- * three, for the icon-only sidebar.
+ * Light / Dark / System, as an M3 segmented button. `compact` collapses it to one icon button
+ * that cycles through the three, for the icon-only sidebar.
  */
 export function ThemeToggle({
   className,
@@ -34,11 +34,11 @@ export function ThemeToggle({
           aria-label={`Theme: ${current.label}. Switch to ${next.label}`}
           onClick={() => setTheme(next.value)}
           className={cn(
-            'flex size-10 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-150 ease-standard hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+            'state-layer flex size-10 cursor-pointer items-center justify-center rounded-full text-on-surface-variant outline-none focus-visible:ring-2 focus-visible:ring-primary',
             className,
           )}
         >
-          <Icon className="size-4" aria-hidden="true" />
+          <Icon className="size-5" aria-hidden="true" />
         </button>
       </WithTooltip>
     );
@@ -48,7 +48,7 @@ export function ThemeToggle({
     <div
       role="group"
       aria-label="Theme"
-      className={cn('flex gap-1 rounded-md bg-muted p-1', className)}
+      className={cn('flex h-10 overflow-hidden rounded-full border border-outline', className)}
     >
       {OPTIONS.map(({ value, label, icon: Icon }) => (
         <WithTooltip key={value} label={`${label} theme`} side="top">
@@ -58,13 +58,13 @@ export function ThemeToggle({
             aria-label={`${label} theme`}
             onClick={() => setTheme(value)}
             className={cn(
-              'flex h-8 flex-1 cursor-pointer items-center justify-center rounded-sm outline-none transition-colors duration-150 ease-standard focus-visible:ring-2 focus-visible:ring-ring',
+              'state-layer flex flex-1 cursor-pointer items-center justify-center border-l border-outline outline-none first:border-l-0 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset',
               theme === value
-                ? 'bg-card text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground',
+                ? 'bg-secondary-container text-on-secondary-container'
+                : 'text-on-surface-variant',
             )}
           >
-            <Icon className="size-4" aria-hidden="true" />
+            <Icon className="size-[18px]" aria-hidden="true" />
           </button>
         </WithTooltip>
       ))}

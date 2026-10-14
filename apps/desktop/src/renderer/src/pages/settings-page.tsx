@@ -34,14 +34,14 @@ export function SettingsPage() {
           <CardTitle>Account</CardTitle>
           <CardDescription>The admin you are signed in as.</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3 text-sm">
+        <CardContent className="flex flex-col gap-3 text-body-medium">
           <p>
-            <span className="text-muted-foreground">User: </span>
+            <span className="text-on-surface-variant">User: </span>
             {auth.data?.displayName ?? auth.data?.username}
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground">Roles in your token: </span>
-            {roles.length === 0 && <span className="text-muted-foreground">none</span>}
+            <span className="text-on-surface-variant">Roles in your token: </span>
+            {roles.length === 0 && <span className="text-on-surface-variant">none</span>}
             {roles.map((role) => (
               <Badge key={role} variant={isAdminRole(role) ? 'success' : 'secondary'}>
                 {role}
@@ -49,7 +49,7 @@ export function SettingsPage() {
             ))}
           </div>
           {auth.data && !auth.data.persistent && (
-            <p role="status" className="text-muted-foreground">
+            <p role="status" className="text-on-surface-variant">
               Your operating system's secure storage is not available, so your sign-in is kept in
               memory only and you will need to sign in again after restarting.
             </p>

@@ -16,6 +16,12 @@ export class ApiRequestError extends Error {
   }
 }
 
+const MAX_ATTEMPTS = 2;
+
+/** The retry policy for read queries: try a transient failure once more, never a definite one. */
+export const retryable = (count: number, error: Error) =>
+  error instanceof ApiRequestError && error.retryable && count < MAX_ATTEMPTS;
+
 export function parseResponse<S extends z.ZodType>(response: ApiResponse, schema: S): z.infer<S> {
   if (!response.ok) {
     throw new ApiRequestError(response.message, response.status, undefined, response.code);
