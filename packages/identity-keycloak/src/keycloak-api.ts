@@ -1,4 +1,4 @@
-import { IdentityProviderError } from '@accessdesk/identity';
+import { DEFAULT_MEMBER_FILTER_CAP, IdentityProviderError } from '@accessdesk/identity';
 import { z } from 'zod';
 
 const userSchema = z.object({
@@ -29,8 +29,14 @@ export type RawRole = z.infer<typeof roleSchema>;
 
 export interface ListUsersQuery {
   search?: string;
+  enabled?: boolean;
   first?: number;
   max?: number;
+}
+
+export interface MemberList {
+  users: RawUser[];
+  capped: boolean;
 }
 
 export interface FindUsersQuery {
@@ -52,11 +58,15 @@ export interface AdminApiOptions {
   issuerUrl: string;
   getToken: () => string | Promise<string>;
   fetch?: typeof globalThis.fetch;
+  // How many members of one group or role are read before the list is cut short.
+  memberFilterCap?: number;
 }
 
 export interface AdminApi {
   listUsers(query: ListUsersQuery): Promise<RawUser[]>;
-  countUsers(query: { search?: string }): Promise<number>;
+  countUsers(query: { search?: string; enabled?: boolean }): Promise<number>;
+  listGroupMembers(groupId: string): Promise<MemberList>;
+  listRoleHolders(roleName: string): Promise<MemberList>;
   findUsersExact(query: FindUsersQuery): Promise<RawUser[]>;
   getUser(subjectId: string): Promise<RawUser>;
   createUser(input: NewUser): Promise<string>;
@@ -151,6 +161,25 @@ export function createAdminApi(options: AdminApiOptions): AdminApi {
     return items;
   }
 
+  // The members and holders endpoints have no count, so the only way to count is to read them.
+  // One extra user is requested past the cap, which tells a full list from a cut-short one.
+  async function listMembers(path: string): Promise<MemberList> {
+    const cap = options.memberFilterCap ?? DEFAULT_MEMBER_FILTER_CAP;
+    const users: RawUser[] = [];
+    while (users.length <= cap) {
+      const max = Math.min(LIST_PAGE_SIZE, cap + 1 - users.length);
+      const res = await request('GET', path, {
+        query: { briefRepresentation: 'true', first: users.length, max },
+      });
+      const batch = await json(res, z.array(userSchema));
+      users.push(...batch);
+      if (batch.length < max) break;
+    }
+    return users.length > cap
+      ? { users: users.slice(0, cap), capped: true }
+      : { users, capped: false };
+  }
+
   async function resolveRoles(names: string[]): Promise<RawRole[]> {
     return Promise.all(
       names.map(async (name) => json(await request('GET', `/roles/${enc(name)}`), roleSchema)),
@@ -160,15 +189,29 @@ export function createAdminApi(options: AdminApiOptions): AdminApi {
   return {
     async listUsers(query) {
       const res = await request('GET', '/users', {
-        query: { search: query.search, first: query.first, max: query.max },
+        query: {
+          search: query.search,
+          enabled: query.enabled === undefined ? undefined : String(query.enabled),
+          first: query.first,
+          max: query.max,
+        },
       });
       return json(res, z.array(userSchema));
     },
 
     async countUsers(query) {
-      const res = await request('GET', '/users/count', { query: { search: query.search } });
+      const res = await request('GET', '/users/count', {
+        query: {
+          search: query.search,
+          enabled: query.enabled === undefined ? undefined : String(query.enabled),
+        },
+      });
       return json(res, z.number());
     },
+
+    listGroupMembers: (groupId) => listMembers(`/groups/${enc(groupId)}/members`),
+
+    listRoleHolders: (roleName) => listMembers(`/roles/${enc(roleName)}/users`),
 
     async findUsersExact(query) {
       if (query.username === undefined && query.email === undefined) {

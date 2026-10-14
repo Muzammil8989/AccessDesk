@@ -3,14 +3,17 @@ import { dismissToast, useToasts, type ToastKind } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 
 const ICONS: Record<ToastKind, { icon: LucideIcon; className: string }> = {
-  success: { icon: CircleCheck, className: 'text-success' },
-  info: { icon: Info, className: 'text-info' },
-  error: { icon: CircleAlert, className: 'text-destructive' },
+  success: { icon: CircleCheck, className: 'bg-inverse-surface text-inverse-on-surface' },
+  info: { icon: Info, className: 'bg-inverse-surface text-inverse-on-surface' },
+  error: { icon: CircleAlert, className: 'bg-error-container text-on-error-container' },
 };
 
 /**
  * Mount once, at the root. The two live regions are always in the page, so a notice added to
  * one is announced: polite for the routine ones, assertive for errors.
+ *
+ * Each notice is an M3 snackbar: the inverse surface (an error uses the error container), a 4px
+ * radius, and a dismiss button.
  */
 export function Toaster() {
   const toasts = useToasts();
@@ -22,17 +25,20 @@ export function Toaster() {
     return (
       <div
         key={item.id}
-        className="pointer-events-auto flex items-start gap-3 rounded-lg border bg-card p-4 text-sm text-card-foreground shadow-md duration-200 animate-in fade-in slide-in-from-bottom-2"
+        className={cn(
+          'pointer-events-auto flex min-h-12 items-center gap-3 rounded-xs py-2 pr-2 pl-4 text-body-medium shadow-elevation-3 duration-200 animate-in fade-in slide-in-from-bottom-2',
+          className,
+        )}
       >
-        <Icon className={cn('mt-0.5 size-4 shrink-0', className)} aria-hidden="true" />
-        <p className="min-w-0 flex-1">{item.message}</p>
+        <Icon className="size-5 shrink-0" aria-hidden="true" />
+        <p className="min-w-0 flex-1 py-1">{item.message}</p>
         <button
           type="button"
           aria-label="Dismiss notification"
           onClick={() => dismissToast(item.id)}
-          className="-m-1.5 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-150 ease-standard hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="state-layer flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-current"
         >
-          <X className="size-4" aria-hidden="true" />
+          <X className="size-5" aria-hidden="true" />
         </button>
       </div>
     );

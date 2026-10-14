@@ -577,6 +577,7 @@ describe('creating and retrying an onboarding with a template', () => {
 describe('API path validation', () => {
   it.each([
     '/employees',
+    '/employees/filter-options',
     '/employees/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11',
     '/templates',
     '/onboarding/options',
@@ -601,5 +602,12 @@ describe('API path validation', () => {
     '/employees/',
     '/employees/8b1c5f5e-7a62-4a0a-9a52-2f1b8f8c1e11/',
     '/employees\n',
+    '/employees/filter-options/',
+    '/employees/filter-options\n',
+    '/employees/filter-options?x=1',
+    '/employees/Filter-Options',
+    '/employees/filter-options/extra',
+    '/employees/filter',
+    '/templates/filter-options',
   ])('rejects %j', (p) => expect(apiPathSchema.safeParse(p).success).toBe(false));
 });

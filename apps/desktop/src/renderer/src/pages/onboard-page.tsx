@@ -9,7 +9,7 @@ import {
 } from '@accessdesk/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ListChecks } from 'lucide-react';
-import { useState } from 'react';
+import { startTransition, useState, ViewTransition } from 'react';
 import { Link } from 'react-router';
 import { OnboardForm, type SubmitFailure, type TemplatesState } from '@/components/onboard-form';
 import { OnboardResultView, type OnboardSummary } from '@/components/onboard-result';
@@ -58,9 +58,9 @@ function FormSkeleton() {
     >
       <div className="flex flex-col gap-6">
         {[2, 1, 2].map((rows, index) => (
-          <div key={index} className="rounded-xl border bg-card shadow-xs">
-            <div className="flex items-center gap-3 border-b px-6 py-4">
-              <Skeleton className="size-8 rounded-lg" />
+          <div key={index} className="rounded-md bg-surface-container-low">
+            <div className="flex items-center gap-3 px-6 pt-6 pb-2">
+              <Skeleton className="size-6" />
               <div className="flex flex-col gap-1.5">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-3 w-64 max-w-full" />
@@ -69,15 +69,14 @@ function FormSkeleton() {
             <div className="grid gap-5 p-6 sm:grid-cols-2">
               {Array.from({ length: rows * 2 }, (_, i) => (
                 <div key={i} className="flex flex-col gap-2">
-                  <Skeleton className="h-4 w-20" />
-                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-14 w-full" />
                 </div>
               ))}
             </div>
           </div>
         ))}
       </div>
-      <Skeleton className="hidden h-80 rounded-xl xl:block" />
+      <Skeleton className="hidden h-80 rounded-md xl:block" />
     </div>
   );
 }
@@ -128,7 +127,7 @@ export function OnboardPage() {
       const result = await create.mutateAsync(values);
       create.reset();
       setRetryError(null);
-      setSession({
+      const next: OnboardSession = {
         result,
         password: result.temporaryPassword ?? null,
         summary: summaryOf(values, options.data, templates.data?.items ?? [], details.managerName),
@@ -139,7 +138,9 @@ export function OnboardPage() {
           ...(values.managerSubjectId && { managerSubjectId: values.managerSubjectId }),
           ...(values.startDate && { startDate: values.startDate }),
         },
-      });
+      };
+      // A transition, so the form fades out and the result fades in.
+      startTransition(() => setSession(next));
       return null;
     } catch (error) {
       signOutOnExpiredSession(error);
@@ -167,7 +168,7 @@ export function OnboardPage() {
     create.reset();
     retry.reset();
     setRetryError(null);
-    setSession(null);
+    startTransition(() => setSession(null));
   }
 
   const canAssignAdmin = canAccess(
@@ -204,15 +205,17 @@ export function OnboardPage() {
       />
 
       {session ? (
-        <OnboardResultView
-          result={session.result}
-          summary={session.summary}
-          password={session.password}
-          retrying={retry.isPending}
-          retryError={retryError}
-          onRetry={() => void retryRemaining()}
-          onReset={startOver}
-        />
+        <ViewTransition key="result" enter="vt-fade-in" exit="vt-fade-out" default="none">
+          <OnboardResultView
+            result={session.result}
+            summary={session.summary}
+            password={session.password}
+            retrying={retry.isPending}
+            retryError={retryError}
+            onRetry={() => void retryRemaining()}
+            onReset={startOver}
+          />
+        </ViewTransition>
       ) : (
         <>
           {options.isPending && <FormSkeleton />}
@@ -243,14 +246,16 @@ export function OnboardPage() {
             </Alert>
           )}
           {options.data && options.data.departments.length > 0 && (
-            <OnboardForm
-              options={options.data}
-              canAssignAdmin={canAssignAdmin}
-              templates={templates.data?.items ?? []}
-              templatesState={templatesState}
-              templateBlockedReason={templateBlockedReason}
-              onSubmit={submit}
-            />
+            <ViewTransition key="form" enter="vt-fade-in" exit="vt-fade-out" default="none">
+              <OnboardForm
+                options={options.data}
+                canAssignAdmin={canAssignAdmin}
+                templates={templates.data?.items ?? []}
+                templatesState={templatesState}
+                templateBlockedReason={templateBlockedReason}
+                onSubmit={submit}
+              />
+            </ViewTransition>
           )}
         </>
       )}

@@ -12,10 +12,19 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  Suspense,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Link, Navigate, Outlet, useMatch } from 'react-router';
 import { BrandMark } from '@/components/brand';
-import { ShellSkeleton } from '@/components/skeletons';
+import { PageSkeleton, ShellSkeleton } from '@/components/skeletons';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -88,7 +97,22 @@ function isToggleShortcut(event: KeyboardEvent): boolean {
   );
 }
 
-function NavItemLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
+interface SidebarState {
+  collapsed: boolean;
+  toggle: () => void;
+}
+
+/** Lets the nav items and the collapse button read the sidebar's state without prop drilling. */
+const SidebarContext = createContext<SidebarState | null>(null);
+
+function useSidebar(): SidebarState {
+  const state = use(SidebarContext);
+  if (!state) throw new Error('useSidebar must be used inside <Sidebar>');
+  return state;
+}
+
+function NavItemLink({ item }: { item: NavItem }) {
+  const { collapsed } = useSidebar();
   const { feature, label, icon: Icon, soon } = item;
   const to = `/${feature}`;
   // Worked out here rather than with NavLink's function `className`: the tooltip trigger merges
@@ -101,7 +125,7 @@ function NavItemLink({ item, collapsed }: { item: NavItem; collapsed: boolean })
         <>
           {label}
           {soon && (
-            <span className="rounded-full bg-tooltip-foreground/15 px-1.5 py-px text-[11px]">
+            <span className="rounded-full bg-inverse-on-surface/15 px-1.5 py-px text-label-small">
               Soon
             </span>
           )}
@@ -111,33 +135,30 @@ function NavItemLink({ item, collapsed }: { item: NavItem; collapsed: boolean })
       <Link
         to={to}
         aria-current={isActive ? 'page' : undefined}
+        // An M3 navigation drawer item: a 48px pill that is filled with the secondary container
+        // while its screen is open. Hover and focus show the state layer.
         className={cn(
-          'group relative flex h-10 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm font-medium outline-none transition-colors duration-150 ease-standard focus-visible:ring-2 focus-visible:ring-ring',
-          collapsed && 'mx-auto size-11 justify-center px-0',
+          'state-layer group flex h-12 cursor-pointer items-center gap-3 rounded-full px-4 text-label-large outline-none focus-visible:ring-2 focus-visible:ring-primary',
+          collapsed && 'mx-auto size-12 justify-center px-0',
           // "Soon" is generated content: it reads as part of the link name in a browser but
           // stays out of the DOM text.
           soon &&
             !collapsed &&
-            "after:ml-auto after:rounded-full after:bg-muted after:px-2 after:py-0.5 after:text-[11px] after:font-medium after:text-muted-foreground after:content-['Soon']",
+            "after:ml-auto after:rounded-full after:bg-surface-container-highest after:px-2 after:py-0.5 after:text-label-small after:text-on-surface-variant after:content-['Soon']",
           isActive
-            ? 'bg-primary/10 text-primary dark:bg-primary/15'
-            : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+            ? 'bg-secondary-container text-on-secondary-container'
+            : 'text-on-surface-variant',
         )}
       >
-        {isActive && !collapsed && (
-          <span
-            aria-hidden="true"
-            className="absolute top-2 bottom-2 -left-3 w-[3px] rounded-r-full bg-primary"
-          />
-        )}
-        <Icon className="size-[18px] shrink-0" aria-hidden="true" />
+        <Icon className="size-6 shrink-0" aria-hidden="true" />
         <span className={cn('truncate', collapsed && 'sr-only')}>{label}</span>
       </Link>
     </WithTooltip>
   );
 }
 
-function CollapseToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+function CollapseToggle() {
+  const { collapsed, toggle } = useSidebar();
   const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
   const Icon = collapsed ? PanelLeftOpen : PanelLeftClose;
   return (
@@ -152,30 +173,41 @@ function CollapseToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle:
       <Button
         variant="ghost"
         size="icon"
-        className="text-muted-foreground hover:text-foreground"
+        className="text-on-surface-variant"
         aria-controls="sidebar"
         aria-expanded={!collapsed}
         aria-label={label}
         aria-keyshortcuts="Control+B"
-        onClick={onToggle}
+        onClick={toggle}
       >
-        <Icon className="size-[18px]" />
+        <Icon className="size-6" />
       </Button>
     </WithTooltip>
   );
 }
 
+interface SidebarUser {
+  displayName: string | null;
+  username: string | null;
+  roles: readonly string[];
+  adminRoles: readonly string[];
+  superAdminRole?: string;
+}
+
 function Sidebar({
   user,
-  allowed,
   onSignOut,
   signingOut,
 }: {
-  user: { displayName: string | null; username: string | null };
-  allowed: (feature: Feature) => boolean;
+  user: SidebarUser;
   onSignOut: () => void;
   signingOut: boolean;
 }) {
+  const { roles, adminRoles, superAdminRole } = user;
+  const allowed = useCallback(
+    (feature: Feature) => canAccess(roles, feature, adminRoles, superAdminRole),
+    [roles, adminRoles, superAdminRole],
+  );
   const compact = useMediaQuery(COMPACT_QUERY);
   const [manual, setManual] = useState<boolean | null>(readSavedCollapsed);
   const collapsed = manual ?? compact;
@@ -195,110 +227,121 @@ function Sidebar({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [toggle]);
 
-  const groups = NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => allowed(item.feature)),
-  })).filter((group) => group.items.length > 0);
+  const sidebar = useMemo(() => ({ collapsed, toggle }), [collapsed, toggle]);
+  const groups = useMemo(
+    () =>
+      NAV_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => allowed(item.feature)),
+      })).filter((group) => group.items.length > 0),
+    [allowed],
+  );
   const name = user.displayName ?? user.username ?? '';
 
   return (
-    <TooltipProvider delayDuration={100}>
-      <aside
-        id="sidebar"
-        className={cn(
-          'flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
-          collapsed ? 'w-[68px]' : 'w-64',
-        )}
-      >
-        <div
+    <SidebarContext value={sidebar}>
+      <TooltipProvider delayDuration={100}>
+        <aside
+          id="sidebar"
           className={cn(
-            'flex shrink-0 items-center border-b border-sidebar-border',
-            collapsed ? 'flex-col gap-2 py-3' : 'h-16 gap-3 pr-2 pl-4',
+            'flex shrink-0 flex-col bg-sidebar text-sidebar-foreground',
+            collapsed ? 'w-20' : 'w-72',
           )}
         >
-          <BrandMark />
-          <div className={cn('min-w-0 flex-1 leading-tight', collapsed && 'sr-only')}>
-            <span className="block text-[15px] font-semibold tracking-tight">AccessDesk</span>
-            <span className="block truncate text-xs text-muted-foreground">Identity admin</span>
-          </div>
-          <CollapseToggle collapsed={collapsed} onToggle={toggle} />
-        </div>
-
-        <nav aria-label="Main" className="flex flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
-          {groups.map((group, index) => (
-            <div key={group.id} className="flex flex-col gap-1">
-              {collapsed && index > 0 && (
-                <span aria-hidden="true" className="mx-auto mb-3 h-px w-6 bg-sidebar-border" />
-              )}
-              <p
-                id={`nav-group-${group.id}`}
-                className={cn(
-                  'px-3 pb-1 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase',
-                  collapsed && 'sr-only',
-                )}
-              >
-                {group.label}
-              </p>
-              <ul aria-labelledby={`nav-group-${group.id}`} className="flex flex-col gap-0.5">
-                {group.items.map((item) => (
-                  <li key={item.feature}>
-                    <NavItemLink item={item} collapsed={collapsed} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-
-          {allowed(SETTINGS_ITEM.feature) && (
-            <ul className="mt-auto border-t border-sidebar-border pt-4">
-              <li>
-                <NavItemLink item={SETTINGS_ITEM} collapsed={collapsed} />
-              </li>
-            </ul>
-          )}
-        </nav>
-
-        <div
-          className={cn(
-            'flex flex-col gap-3 border-t border-sidebar-border p-3',
-            collapsed && 'items-center',
-          )}
-        >
-          <ThemeToggle compact={collapsed} />
-          <div className={cn('flex items-center gap-2.5', collapsed ? 'flex-col' : 'pl-1')}>
-            <WithTooltip
-              disabled={!collapsed}
-              label={
-                <span className="flex flex-col">
-                  <span>{name}</span>
-                  {user.username && <span className="font-normal opacity-75">{user.username}</span>}
-                </span>
-              }
-            >
-              <span className="flex">
-                <Avatar name={name} className="size-9" />
-              </span>
-            </WithTooltip>
+          <div
+            className={cn(
+              'flex shrink-0 items-center',
+              collapsed ? 'flex-col gap-2 py-3' : 'h-20 gap-3 pr-3 pl-5',
+            )}
+          >
+            <BrandMark />
             <div className={cn('min-w-0 flex-1', collapsed && 'sr-only')}>
-              <p className="truncate text-sm font-medium">{name}</p>
-              <p className="truncate text-xs text-muted-foreground">{user.username}</p>
+              <span className="block text-title-medium">AccessDesk</span>
+              <span className="block truncate text-body-small text-on-surface-variant">
+                Identity admin
+              </span>
             </div>
-            <WithTooltip label="Sign out" side={collapsed ? 'right' : 'top'}>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-foreground"
-                aria-label="Sign out"
-                onClick={onSignOut}
-                disabled={signingOut}
-              >
-                <LogOut className="size-[18px]" />
-              </Button>
-            </WithTooltip>
+            <CollapseToggle />
           </div>
-        </div>
-      </aside>
-    </TooltipProvider>
+
+          <nav aria-label="Main" className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-2">
+            {groups.map((group, index) => (
+              <div key={group.id} className="flex flex-col gap-1">
+                {collapsed && index > 0 && (
+                  <span aria-hidden="true" className="mx-auto mb-3 h-px w-6 bg-outline-variant" />
+                )}
+                <p
+                  id={`nav-group-${group.id}`}
+                  className={cn(
+                    'px-4 pt-2 pb-1 text-title-small text-on-surface-variant',
+                    collapsed && 'sr-only',
+                  )}
+                >
+                  {group.label}
+                </p>
+                <ul aria-labelledby={`nav-group-${group.id}`} className="flex flex-col gap-0.5">
+                  {group.items.map((item) => (
+                    <li key={item.feature}>
+                      <NavItemLink item={item} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+
+            {allowed(SETTINGS_ITEM.feature) && (
+              <ul className="mt-auto border-t border-outline-variant pt-3">
+                <li>
+                  <NavItemLink item={SETTINGS_ITEM} />
+                </li>
+              </ul>
+            )}
+          </nav>
+
+          <div
+            className={cn(
+              'flex flex-col gap-3 border-t border-outline-variant p-3',
+              collapsed && 'items-center',
+            )}
+          >
+            <ThemeToggle compact={collapsed} />
+            <div className={cn('flex items-center gap-2.5', collapsed ? 'flex-col' : 'pl-1')}>
+              <WithTooltip
+                disabled={!collapsed}
+                label={
+                  <span className="flex flex-col">
+                    <span>{name}</span>
+                    {user.username && (
+                      <span className="font-normal opacity-75">{user.username}</span>
+                    )}
+                  </span>
+                }
+              >
+                <span className="flex">
+                  <Avatar name={name} />
+                </span>
+              </WithTooltip>
+              <div className={cn('min-w-0 flex-1', collapsed && 'sr-only')}>
+                <p className="truncate text-label-large">{name}</p>
+                <p className="truncate text-body-small text-on-surface-variant">{user.username}</p>
+              </div>
+              <WithTooltip label="Sign out" side={collapsed ? 'right' : 'top'}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-on-surface-variant"
+                  aria-label="Sign out"
+                  onClick={onSignOut}
+                  disabled={signingOut}
+                >
+                  <LogOut className="size-6" />
+                </Button>
+              </WithTooltip>
+            </div>
+          </div>
+        </aside>
+      </TooltipProvider>
+    </SidebarContext>
   );
 }
 
@@ -317,7 +360,7 @@ export function AppLayout() {
   if (settings.isError || auth.isError) {
     return (
       <div className="grid min-h-screen place-items-center p-6">
-        <p role="alert" className="max-w-sm text-center text-sm text-destructive">
+        <p role="alert" className="max-w-sm text-center text-body-medium text-error">
           The app could not read its local state. Restart AccessDesk.
         </p>
       </div>
@@ -338,16 +381,11 @@ export function AppLayout() {
           event.preventDefault();
           mainRef.current?.focus();
         }}
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:shadow-md focus:outline-none focus:ring-2 focus:ring-ring"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-full focus:bg-primary focus:px-6 focus:py-2.5 focus:text-label-large focus:text-on-primary focus:shadow-elevation-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
       >
         Skip to main content
       </a>
-      <Sidebar
-        user={user}
-        allowed={(feature) => canAccess(user.roles, feature, user.adminRoles, user.superAdminRole)}
-        onSignOut={() => signOut.mutate()}
-        signingOut={signOut.isPending}
-      />
+      <Sidebar user={user} onSignOut={() => signOut.mutate()} signingOut={signOut.isPending} />
       <main
         id="main-content"
         ref={mainRef}
@@ -355,7 +393,9 @@ export function AppLayout() {
         className="flex-1 overflow-y-auto outline-none"
       >
         <div className="mx-auto w-full max-w-6xl px-8 pt-8 pb-12">
-          <Outlet />
+          <Suspense fallback={<PageSkeleton />}>
+            <Outlet />
+          </Suspense>
         </div>
       </main>
     </div>

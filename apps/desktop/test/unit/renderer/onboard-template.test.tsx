@@ -129,7 +129,7 @@ async function fillPerson() {
   await userEvent.type(await screen.findByLabelText('First name'), 'Ann');
   await userEvent.type(screen.getByLabelText('Last name'), 'Lee');
   await userEvent.type(screen.getByLabelText('Email'), 'ann@example.com');
-  await userEvent.type(screen.getByLabelText('Username'), 'ann.lee');
+  // The username already follows the name ("ann.lee"), so there is nothing to type for it.
 }
 
 const submit = () => userEvent.click(screen.getByRole('button', { name: 'Onboard employee' }));

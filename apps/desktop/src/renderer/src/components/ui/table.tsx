@@ -12,7 +12,7 @@ export function Table({
 }: ComponentProps<'table'> & { containerClassName?: string }) {
   return (
     <div className={cn('relative w-full overflow-x-auto', containerClassName)}>
-      <table className={cn('w-full caption-bottom text-sm', className)} {...props} />
+      <table className={cn('w-full caption-bottom text-body-medium', className)} {...props} />
     </div>
   );
 }
@@ -29,7 +29,7 @@ export function TableRow({ className, ...props }: ComponentProps<'tr'>) {
   return (
     <tr
       className={cn(
-        'border-b transition-colors duration-150 ease-standard hover:bg-muted/50',
+        'border-b border-outline-variant transition-colors duration-150 ease-standard hover:bg-on-surface/8',
         className,
       )}
       {...props}
@@ -41,7 +41,7 @@ export function TableHead({ className, ...props }: ComponentProps<'th'>) {
   return (
     <th
       className={cn(
-        'sticky top-0 z-10 h-10 bg-muted px-4 text-left align-middle text-xs font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase',
+        'sticky top-0 z-10 h-12 bg-surface-container px-4 text-left align-middle text-label-large whitespace-nowrap text-on-surface-variant',
         className,
       )}
       {...props}

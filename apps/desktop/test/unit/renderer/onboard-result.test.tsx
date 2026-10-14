@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OnboardResultView,
@@ -29,16 +30,18 @@ const complete = {
 
 function view(props: Partial<React.ComponentProps<typeof OnboardResultView>> = {}) {
   return render(
-    <OnboardResultView
-      result={complete}
-      summary={summary}
-      password={PASSWORD}
-      retrying={false}
-      retryError={null}
-      onRetry={() => undefined}
-      onReset={() => undefined}
-      {...props}
-    />,
+    <MemoryRouter>
+      <OnboardResultView
+        result={complete}
+        summary={summary}
+        password={PASSWORD}
+        retrying={false}
+        retryError={null}
+        onRetry={() => undefined}
+        onReset={() => undefined}
+        {...props}
+      />
+    </MemoryRouter>,
   );
 }
 
@@ -145,6 +148,23 @@ describe('OnboardResultView: the one-time password', () => {
     expect(screen.queryByLabelText('Temporary password')).not.toBeInTheDocument();
     expect(screen.queryByText(/will not be shown again/)).not.toBeInTheDocument();
   });
+
+  it('copies the username and password together for handing over', async () => {
+    render(<Toaster />);
+    view();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy sign-in details' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledWith(
+      `Username: ann.lee\nTemporary password: ${PASSWORD}\nChoose a new password the first time you sign in.`,
+    );
+    expect(screen.getByRole('button', { name: 'Sign-in details copied' })).toBeInTheDocument();
+    // The other button still says Copy: only the one that was used shows the result.
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+  });
 });
 
 describe('OnboardResultView: the outcome', () => {
@@ -202,6 +222,33 @@ describe('OnboardResultView: the outcome', () => {
     expect(steps[2]).toHaveTextContent('Assign the template role');
     expect(steps[2]).toHaveTextContent('ghost');
     expect(steps[2]).toHaveTextContent('Role "ghost" does not exist in the identity provider');
+  });
+
+  it('starts with the steps closed when everything worked, and open when something did not', () => {
+    const { unmount } = view();
+    expect(screen.getByText('3 of 3 done').closest('details')).not.toHaveAttribute('open');
+    unmount();
+
+    view({
+      result: {
+        ...complete,
+        status: 'partial',
+        steps: [
+          { name: 'create_user', status: 'done' },
+          { name: 'add_to_group', status: 'failed', message: 'Could not do it' },
+        ],
+      },
+    });
+    expect(screen.getByText('1 of 2 done').closest('details')).toHaveAttribute('open');
+  });
+
+  it('links to the new person in Employees, found by username', () => {
+    view();
+
+    expect(screen.getByRole('link', { name: 'View in Employees' })).toHaveAttribute(
+      'href',
+      '/employees?q=ann.lee',
+    );
   });
 
   it('shows why a retry did not work as an alert', () => {

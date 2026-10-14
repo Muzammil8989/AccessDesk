@@ -10,10 +10,9 @@ import {
 } from '@accessdesk/shared';
 import {
   Building2,
-  CalendarDays,
   CircleAlert,
   CircleCheck,
-  KeyRound,
+  LayoutTemplate,
   ListChecks,
   Loader2,
   RotateCcw,
@@ -23,7 +22,7 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useForm, useWatch, type Control } from 'react-hook-form';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { MANAGER_FIELD_ID, ManagerPicker, nameOfEmployee } from '@/components/manager-picker';
@@ -32,6 +31,7 @@ import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { SelectField } from '@/components/ui/select-field';
 import { START_DATE_NOTE, formatDay } from '@/lib/format';
+import { suggestUsername } from '@/lib/username';
 import { cn } from '@/lib/utils';
 
 export interface SubmitFailure {
@@ -74,16 +74,25 @@ const DEFAULT_VALUES: OnboardEmployeeInput = {
 
 /** The fields in page order, for the error summary. The summary lists labels, not messages. */
 const FIELDS: { name: keyof OnboardEmployeeInput; label: string }[] = [
+  { name: 'templateId', label: 'Template' },
   { name: 'firstName', label: 'First name' },
   { name: 'lastName', label: 'Last name' },
   { name: 'email', label: 'Email' },
   { name: 'username', label: 'Username' },
-  { name: 'templateId', label: 'Template' },
   { name: 'departmentGroupId', label: 'Department' },
   { name: 'role', label: 'Role' },
   { name: 'managerSubjectId', label: 'Manager' },
   { name: 'startDate', label: 'Start date' },
 ];
+
+/** The fields that must be filled in before the account can be created. */
+const REQUIRED_FIELDS = [
+  'firstName',
+  'lastName',
+  'email',
+  'username',
+  'departmentGroupId',
+] as const satisfies readonly (keyof OnboardEmployeeInput)[];
 
 const ITEM_ICONS: Record<Template['items'][number]['kind'], LucideIcon> = {
   GROUP_MEMBERSHIP: Users,
@@ -112,20 +121,16 @@ function Section({
     <fieldset
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
-      className="min-w-0 rounded-xl border bg-card text-card-foreground shadow-xs"
+      className="min-w-0 rounded-md bg-surface-container-low text-on-surface"
     >
-      <div className="flex items-start gap-3 border-b px-6 py-4">
-        <span
-          aria-hidden="true"
-          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground"
-        >
-          <Icon className="size-4" />
-        </span>
+      <div className="flex items-start gap-4 px-6 pt-6 pb-2">
+        {/* A plain icon: no background behind it. */}
+        <Icon className="size-6 shrink-0 text-primary" aria-hidden="true" />
         <div className="min-w-0">
-          <h2 id={titleId} className="text-sm font-semibold">
+          <h2 id={titleId} className="text-title-medium">
             {title}
           </h2>
-          <p id={descriptionId} className="text-sm text-muted-foreground">
+          <p id={descriptionId} className="text-body-medium text-on-surface-variant">
             {description}
           </p>
         </div>
@@ -150,22 +155,22 @@ function TemplatePreview({ template }: { template: Template }) {
   const headingId = 'template-preview-title';
   if (template.items.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
+      <p className="text-body-small text-on-surface-variant">
         This template adds nothing beyond the department and role.
       </p>
     );
   }
   return (
-    <div className="rounded-lg border border-info/30 bg-info/5 p-4 text-sm">
-      <p id={headingId} className="font-medium">
+    <div className="rounded-md bg-info-container p-4 text-body-medium text-on-info-container">
+      <p id={headingId} className="text-title-small">
         This template will also
       </p>
       <ul aria-labelledby={headingId} className="mt-2 flex flex-col gap-1.5">
         {template.items.map((item) => {
           const Icon = ITEM_ICONS[item.kind];
           return (
-            <li key={item.id} className="flex items-start gap-2 text-muted-foreground">
-              <Icon className="mt-0.5 size-4 shrink-0 text-info" aria-hidden="true" />
+            <li key={item.id} className="flex items-start gap-2">
+              <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
               <span className="min-w-0 break-words">{describeItem(item)}</span>
             </li>
           );
@@ -178,11 +183,11 @@ function TemplatePreview({ template }: { template: Template }) {
 function SummaryRow({ label, value }: { label: string; value: string | undefined }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-2">
-      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dt className="shrink-0 text-on-surface-variant">{label}</dt>
       <dd
         className={cn(
           'min-w-0 truncate text-right',
-          value ? 'font-medium' : 'text-muted-foreground/80',
+          value ? 'text-label-large text-on-surface' : 'text-on-surface-variant',
         )}
       >
         {value || 'Not set'}
@@ -197,13 +202,11 @@ function OnboardSummary({
   options,
   templates,
   manager,
-  actions,
 }: {
   control: Control<OnboardEmployeeInput, unknown, OnboardEmployee>;
   options: OnboardingOptions;
   templates: Template[];
   manager: Employee | null;
-  actions: ReactNode;
 }) {
   const values = useWatch({ control });
   const fullName = [values.firstName, values.lastName]
@@ -234,23 +237,23 @@ function OnboardSummary({
   ];
 
   return (
-    <aside aria-labelledby="onboard-summary-title" className="flex flex-col gap-4">
-      <div className="rounded-xl border bg-card text-card-foreground shadow-xs">
-        <div className="flex items-center gap-3 border-b px-5 py-4">
-          <Avatar name={fullName} className="size-11 text-sm" />
+    <aside aria-labelledby="onboard-summary-title">
+      <div className="rounded-md bg-surface-container-low text-on-surface">
+        <div className="flex items-center gap-3 border-b border-outline-variant px-5 py-4">
+          <Avatar name={fullName} className="size-12" />
           <div className="min-w-0">
-            <h2 id="onboard-summary-title" className="text-xs font-medium text-muted-foreground">
+            <h2 id="onboard-summary-title" className="text-label-medium text-on-surface-variant">
               Summary
             </h2>
-            <p className={cn('truncate font-semibold', !fullName && 'text-muted-foreground')}>
+            <p className={cn('truncate text-title-medium', !fullName && 'text-on-surface-variant')}>
               {fullName || 'New employee'}
             </p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-body-small text-on-surface-variant">
               {values.email?.trim() || 'No email yet'}
             </p>
           </div>
         </div>
-        <dl className="divide-y px-5 py-1 text-sm">
+        <dl className="divide-y divide-outline-variant px-5 py-1 text-body-medium">
           <SummaryRow label="Username" value={values.username?.trim()} />
           <SummaryRow label="Department" value={department?.name} />
           <SummaryRow label="Role" value={role} />
@@ -261,23 +264,72 @@ function OnboardSummary({
             value={values.startDate ? formatDay(values.startDate) : undefined}
           />
         </dl>
-        <div className="flex flex-col gap-2 border-t p-5">{actions}</div>
-      </div>
-
-      <div className="rounded-xl border bg-card p-5 text-card-foreground shadow-xs">
-        <h3 id="onboard-next-title" className="text-sm font-semibold">
-          What happens next
-        </h3>
-        <ol aria-labelledby="onboard-next-title" className="mt-3 flex flex-col gap-2.5 text-sm">
-          {next.map((step) => (
-            <li key={step} className="flex items-start gap-2.5 text-muted-foreground">
-              <CircleCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />
-              <span>{step}</span>
-            </li>
-          ))}
-        </ol>
+        <div className="border-t border-outline-variant px-5 py-4">
+          <h3 id="onboard-next-title" className="text-title-small">
+            What happens next
+          </h3>
+          <ol
+            aria-labelledby="onboard-next-title"
+            className="mt-3 flex flex-col gap-2 text-body-medium"
+          >
+            {next.map((step) => (
+              <li key={step} className="flex items-start gap-2.5 text-on-surface-variant">
+                <CircleCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
     </aside>
+  );
+}
+
+/**
+ * Create and Clear. Below the wide layout it floats at the bottom of the window, so the Create
+ * button is always in reach however far down the form the admin has scrolled. On a wide window it
+ * sits under the summary instead.
+ */
+function ActionBar({
+  control,
+  formError,
+  submitting,
+  canClear,
+  onClear,
+}: {
+  control: Control<OnboardEmployeeInput, unknown, OnboardEmployee>;
+  formError: string | null;
+  submitting: boolean;
+  canClear: boolean;
+  onClear: () => void;
+}) {
+  // Only the required fields: a role, template or start-date change does not touch the count.
+  const values = useWatch({ control, name: REQUIRED_FIELDS });
+  const missing = values.filter((value) => !value?.trim()).length;
+  return (
+    <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-md bg-surface-container-high p-3 pl-5 shadow-elevation-2 xl:static xl:flex-col xl:items-stretch xl:bg-surface-container-low xl:p-5 xl:shadow-none">
+      {formError && (
+        <Alert variant="destructive" role="alert" className="w-full">
+          <AlertTitle>Could not create the account</AlertTitle>
+          <AlertDescription>{formError}</AlertDescription>
+        </Alert>
+      )}
+      <p className="min-w-0 flex-1 text-body-medium text-on-surface-variant xl:flex-none">
+        {missing > 0
+          ? `${missing} required ${missing === 1 ? 'field' : 'fields'} left`
+          : 'Everything required is filled in.'}
+      </p>
+      <div className="flex gap-2 xl:flex-col-reverse">
+        <Button type="button" variant="ghost" onClick={onClear} disabled={submitting || !canClear}>
+          <RotateCcw />
+          Clear form
+        </Button>
+        <Button type="submit" size="lg" disabled={submitting}>
+          {submitting ? <Loader2 className="animate-spin" /> : <UserPlus />}
+          {submitting ? 'Creating…' : 'Onboard employee'}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -292,6 +344,8 @@ export function OnboardForm({
   const form = useForm<OnboardEmployeeInput, unknown, OnboardEmployee>({
     resolver: zodResolver(onboardEmployeeSchema),
     defaultValues: DEFAULT_VALUES,
+    // A field is checked when the admin leaves it, so a mistake shows up next to it right away.
+    mode: 'onTouched',
     // The summary takes focus on a failed submit; each field is one link away.
     shouldFocusError: false,
   });
@@ -301,16 +355,32 @@ export function OnboardForm({
   const [invalidAttempts, setInvalidAttempts] = useState(0);
   const [prefillNote, setPrefillNote] = useState<string | null>(null);
   const [manager, setManager] = useState<Employee | null>(null);
+  // Until the admin types a username themselves, it follows the name.
+  const [usernameEdited, setUsernameEdited] = useState(false);
   const summaryRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (invalidAttempts > 0) summaryRef.current?.focus();
   }, [invalidAttempts]);
 
-  const roles = options.roles.map((role) => ({
-    ...role,
-    disabled: !role.allowed || (role.name === 'admin' && !canAssignAdmin),
-  }));
+  /** While the username is untouched it follows the name. Runs from the name fields' change events. */
+  function suggestFromName() {
+    if (usernameEdited) return;
+    const { firstName, lastName } = form.getValues();
+    form.setValue('username', suggestUsername(firstName ?? '', lastName ?? ''), {
+      shouldDirty: true,
+    });
+    form.clearErrors('username');
+  }
+
+  const roles = useMemo(
+    () =>
+      options.roles.map((role) => ({
+        ...role,
+        disabled: !role.allowed || (role.name === 'admin' && !canAssignAdmin),
+      })),
+    [options.roles, canAssignAdmin],
+  );
   const blocked = roles.find((role) => role.disabled);
   const selectedTemplateId = useWatch({ control: form.control, name: 'templateId' });
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
@@ -318,6 +388,7 @@ export function OnboardForm({
     const reason = templateBlockedReason(template);
     return reason ? [{ template, reason }] : [];
   });
+  const unavailableIds = new Set(unavailable.map(({ template }) => template.id));
   const showTemplates = templatesState !== 'ready' || templates.length > 0;
 
   let templateHint: string | undefined;
@@ -398,6 +469,7 @@ export function OnboardForm({
   function clearForm() {
     form.reset(DEFAULT_VALUES);
     setManager(null);
+    setUsernameEdited(false);
     setPrefillNote(null);
     setFormError(null);
     setShowSummary(false);
@@ -412,17 +484,21 @@ export function OnboardForm({
       noValidate
     >
       <div className="flex min-w-0 flex-col gap-6">
+        <p className="text-body-medium text-on-surface-variant">
+          All fields are required unless marked optional.
+        </p>
+
         {invalidFields.length > 0 && (
           <div
             ref={summaryRef}
             role="group"
             tabIndex={-1}
             aria-labelledby="onboard-errors-title"
-            className="flex gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex gap-3 rounded-md bg-error-container p-4 text-body-medium text-on-error-container outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
-            <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+            <CircleAlert className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
             <div className="min-w-0">
-              <p id="onboard-errors-title" className="font-medium text-destructive">
+              <p id="onboard-errors-title" className="text-title-small">
                 Fix these fields to continue
               </p>
               <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
@@ -431,7 +507,7 @@ export function OnboardForm({
                     <button
                       type="button"
                       onClick={() => focusField(field.name)}
-                      className="cursor-pointer rounded-sm text-foreground underline underline-offset-4 outline-none hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+                      className="cursor-pointer rounded-xs underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       {field.label}
                     </button>
@@ -442,58 +518,12 @@ export function OnboardForm({
           </div>
         )}
 
-        <Section
-          icon={UserRound}
-          title="Who they are"
-          description="Their name and work email, as they appear in the directory."
-        >
-          <div className="grid gap-5 sm:grid-cols-2">
-            <FormField
-              id="firstName"
-              label="First name"
-              autoComplete="off"
-              error={errors.firstName}
-              {...form.register('firstName')}
-            />
-            <FormField
-              id="lastName"
-              label="Last name"
-              autoComplete="off"
-              error={errors.lastName}
-              {...form.register('lastName')}
-            />
-          </div>
-          <FormField
-            id="email"
-            label="Email"
-            type="email"
-            autoComplete="off"
-            error={errors.email}
-            {...form.register('email')}
-          />
-        </Section>
-
-        <Section
-          icon={KeyRound}
-          title="Sign-in details"
-          description="The username they sign in with. A temporary password is created for you."
-        >
-          <FormField
-            id="username"
-            label="Username"
-            hint="Lowercase letters, numbers, dots, dashes or underscores"
-            autoComplete="off"
-            error={errors.username}
-            {...form.register('username')}
-          />
-        </Section>
-
-        <Section
-          icon={Building2}
-          title="Where they work"
-          description="A template fills in the department and role, and can add groups, roles and tasks."
-        >
-          {showTemplates && (
+        {showTemplates && (
+          <Section
+            icon={LayoutTemplate}
+            title="Start from a template"
+            description="Optional. A template fills in the department and role, and can add groups, roles and tasks."
+          >
             <div className="flex flex-col gap-3">
               <SelectField
                 id="templateId"
@@ -512,20 +542,68 @@ export function OnboardForm({
                   <option
                     key={template.id}
                     value={template.id}
-                    disabled={templateBlockedReason(template) !== null}
+                    disabled={unavailableIds.has(template.id)}
                   >
                     {template.name}
                   </option>
                 ))}
               </SelectField>
               {prefillNote && (
-                <p role="status" className="text-xs text-muted-foreground">
+                <p role="status" className="px-4 text-body-small text-on-surface-variant">
                   {prefillNote}
                 </p>
               )}
               {selectedTemplate && <TemplatePreview template={selectedTemplate} />}
             </div>
-          )}
+          </Section>
+        )}
+
+        <Section
+          icon={UserRound}
+          title="Who they are"
+          description="Their name and work email, and the username they sign in with. A temporary password is created for you."
+        >
+          <div className="grid gap-5 sm:grid-cols-2">
+            <FormField
+              id="firstName"
+              label="First name"
+              autoComplete="off"
+              error={errors.firstName}
+              {...form.register('firstName', { onChange: suggestFromName })}
+            />
+            <FormField
+              id="lastName"
+              label="Last name"
+              autoComplete="off"
+              error={errors.lastName}
+              {...form.register('lastName', { onChange: suggestFromName })}
+            />
+          </div>
+          <FormField
+            id="email"
+            label="Email"
+            type="email"
+            autoComplete="off"
+            error={errors.email}
+            {...form.register('email')}
+          />
+          <FormField
+            id="username"
+            label="Username"
+            hint="Suggested from the name. Change it if you like: lowercase letters, numbers, dots, dashes or underscores."
+            autoComplete="off"
+            error={errors.username}
+            {...form.register('username', {
+              onChange: () => setUsernameEdited(true),
+            })}
+          />
+        </Section>
+
+        <Section
+          icon={Building2}
+          title="Where they work"
+          description="Department and role are required. The manager and start date are optional and are saved on the onboarding checklist."
+        >
           <div className="grid gap-5 sm:grid-cols-2">
             <SelectField
               id="departmentGroupId"
@@ -554,13 +632,6 @@ export function OnboardForm({
               ))}
             </SelectField>
           </div>
-        </Section>
-
-        <Section
-          icon={CalendarDays}
-          title="Team and start"
-          description="Optional. Both are saved on the onboarding checklist."
-        >
           <ManagerPicker
             selected={manager}
             onSelect={chooseManager}
@@ -579,38 +650,22 @@ export function OnboardForm({
         </Section>
       </div>
 
-      {/* On wide windows the summary and the actions stay in view while the form scrolls, so
-          nothing has to float over the fields. */}
-      <div className="xl:sticky xl:top-6">
+      {/* On wide windows the summary and the actions stay in view in a column beside the form.
+          On narrower ones this wrapper disappears (`contents`): the summary follows the form and
+          the action bar floats at the bottom of the window. */}
+      <div className="contents xl:sticky xl:top-6 xl:flex xl:flex-col xl:gap-4">
         <OnboardSummary
           control={form.control}
           options={options}
           templates={templates}
           manager={manager}
-          actions={
-            <>
-              {formError && (
-                <Alert variant="destructive" role="alert">
-                  <AlertTitle>Could not create the account</AlertTitle>
-                  <AlertDescription>{formError}</AlertDescription>
-                </Alert>
-              )}
-              <Button type="submit" size="lg" disabled={isSubmitting} className="w-full">
-                {isSubmitting ? <Loader2 className="animate-spin" /> : <UserPlus />}
-                {isSubmitting ? 'Creating…' : 'Onboard employee'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full text-muted-foreground"
-                onClick={clearForm}
-                disabled={isSubmitting || (!isDirty && !manager)}
-              >
-                <RotateCcw />
-                Clear form
-              </Button>
-            </>
-          }
+        />
+        <ActionBar
+          control={form.control}
+          formError={formError}
+          submitting={isSubmitting}
+          canClear={isDirty || Boolean(manager)}
+          onClear={clearForm}
         />
       </div>
     </form>

@@ -13,3 +13,5 @@ export const START_DATE_NOTE =
 
 export const START_DATE_NOTE_SAVED =
   'Information only. The account was created and enabled when they were onboarded. It does not unlock on this date.';
+
+export const taskCount = (count: number) => `${count} ${count === 1 ? 'task' : 'tasks'}`;

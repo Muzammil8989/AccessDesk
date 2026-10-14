@@ -8,10 +8,10 @@ describe('createIdentityProviderFactory', () => {
   } as const;
 
   it('builds a provider that acts as the given admin', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(3));
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json([]));
     const identityFor = createIdentityProviderFactory(config, fetchMock);
 
-    expect(await identityFor('admin-token').countUsers()).toBe(3);
+    expect(await identityFor('admin-token').listGroups()).toEqual([]);
 
     const [, init] = fetchMock.mock.calls[0]!;
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer admin-token');

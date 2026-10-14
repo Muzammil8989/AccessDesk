@@ -18,17 +18,29 @@ export interface IdentityGroup {
 export interface IdentityRole {
   name: string;
   description: string | null;
+  // True for roles the identity provider creates itself, so a screen can hide them by default.
+  builtin: boolean;
 }
 
+// groupId and role are alternatives. They list direct members only, and the provider has to
+// read every member to count them, so those lists stop at memberFilterCap.
 export interface ListUsersParams {
   search?: string;
+  enabled?: boolean;
+  groupId?: string;
+  role?: string;
   first?: number;
   max?: number;
 }
 
-export interface CountUsersParams {
-  search?: string;
+export interface UserPage {
+  users: IdentityUser[];
+  total: number;
+  // True when a group or role list reached the cap: total and users are then incomplete.
+  capped: boolean;
 }
+
+export const DEFAULT_MEMBER_FILTER_CAP = 2000;
 
 export interface FindUsersParams {
   username?: string;
@@ -52,8 +64,7 @@ export interface CreateUserInput {
 }
 
 export interface IdentityProvider {
-  listUsers(params?: ListUsersParams): Promise<IdentityUser[]>;
-  countUsers(params?: CountUsersParams): Promise<number>;
+  listUsersPage(params?: ListUsersParams): Promise<UserPage>;
   findUsers(params: FindUsersParams): Promise<IdentityUser[]>;
   getUser(subjectId: string): Promise<IdentityUser>;
   createUser(input: CreateUserInput): Promise<string>;

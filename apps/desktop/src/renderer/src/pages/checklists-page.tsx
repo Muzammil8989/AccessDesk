@@ -1,8 +1,9 @@
 import type { ChecklistList } from '@accessdesk/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, CircleCheck, ClipboardCheck } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
+import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -16,10 +17,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ApiRequestError } from '@/lib/api';
+import { useReauthOn401 } from '@/hooks/use-reauth-on-401';
 import { CHECKLIST_PAGE_SIZE, checklistListQuery } from '@/lib/checklists-api';
-import { formatDay } from '@/lib/format';
-import { authQuery } from '@/lib/session';
+import { formatDay, taskCount } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 type Filter = 'open' | 'done';
@@ -29,22 +29,15 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: 'done', label: 'Done' },
 ];
 
-const taskCount = (count: number) => `${count} ${count === 1 ? 'task' : 'tasks'}`;
-
 function nameOf(item: ChecklistList['items'][number]): string {
   return item.person?.displayName ?? 'Unknown person';
 }
 
 export function ChecklistsPage() {
-  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<Filter>('open');
   const [page, setPage] = useState(0);
   const checklists = useQuery(checklistListQuery(filter, page));
-
-  const status = checklists.error instanceof ApiRequestError ? checklists.error.status : null;
-  useEffect(() => {
-    if (status === 401) void queryClient.invalidateQueries({ queryKey: authQuery.queryKey });
-  }, [status, queryClient]);
+  useReauthOn401(checklists.error);
 
   const data = checklists.data;
   const total = data?.total ?? 0;
@@ -67,11 +60,11 @@ export function ChecklistsPage() {
       />
 
       <fieldset className="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <legend className="mb-2 text-sm font-medium">Show</legend>
+        <legend className="mb-2 text-label-large">Show</legend>
         {FILTERS.map((option) => (
           <label
             key={option.value}
-            className="flex min-h-10 cursor-pointer items-center gap-2 text-sm"
+            className="flex min-h-10 cursor-pointer items-center gap-2 text-body-large"
           >
             <input
               type="radio"
@@ -82,7 +75,7 @@ export function ChecklistsPage() {
                 setFilter(option.value);
                 setPage(0);
               }}
-              className="size-4 cursor-pointer accent-primary focus-visible:ring-2 focus-visible:ring-ring"
+              className="size-5 cursor-pointer accent-primary focus-visible:ring-2 focus-visible:ring-primary"
             />
             {option.label}
           </label>
@@ -107,7 +100,7 @@ export function ChecklistsPage() {
       ) : (
         <div
           className={cn(
-            'overflow-hidden rounded-xl border bg-card shadow-xs transition-opacity duration-150 ease-standard',
+            'overflow-hidden rounded-md border border-outline-variant bg-surface transition-opacity duration-150 ease-standard',
             refreshing && 'opacity-70',
           )}
           aria-busy={checklists.isFetching}
@@ -146,8 +139,8 @@ export function ChecklistsPage() {
               {data?.items.map((item) => (
                 <TableRow key={item.subjectId}>
                   <TableCell>
-                    <div className="font-medium">{nameOf(item)}</div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-body-large">{nameOf(item)}</div>
+                    <div className="text-body-small text-on-surface-variant">
                       {item.person ? item.person.username : 'Not found in the identity provider'}
                     </div>
                   </TableCell>
@@ -189,28 +182,22 @@ export function ChecklistsPage() {
               {data && data.items.length === 0 && (
                 <TableRow className="hover:bg-transparent">
                   <TableCell colSpan={5} className="p-0">
-                    <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
-                      <span
-                        aria-hidden="true"
-                        className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground"
-                      >
-                        <ClipboardCheck className="size-5" />
-                      </span>
-                      <p className="font-medium">
+                    <EmptyState icon={ClipboardCheck}>
+                      <p className="text-title-medium">
                         {filter === 'open' ? 'No open checklists.' : 'No finished checklists yet.'}
                       </p>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-body-medium text-on-surface-variant">
                         Choosing a template with manual tasks, or giving a manager or a start date,
                         when you onboard someone creates one.
                       </p>
-                    </div>
+                    </EmptyState>
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant px-4 py-3 text-body-medium text-on-surface-variant">
             <span role="status">{total > 0 ? `Showing ${from}–${to} of ${total}` : ''}</span>
             <div className="flex items-center gap-3">
               {pageCount > 1 && (

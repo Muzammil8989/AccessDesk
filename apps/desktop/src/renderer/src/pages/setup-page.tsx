@@ -15,9 +15,7 @@ export function SetupPage() {
       <Card className="w-full max-w-lg">
         <CardHeader>
           <BrandMark className="mb-2 size-10" />
-          <CardTitle as="h1" className="text-xl">
-            Welcome to AccessDesk
-          </CardTitle>
+          <CardTitle as="h1">Welcome to AccessDesk</CardTitle>
           <CardDescription>
             Connect to your identity provider to get started. These are public settings only: no
             password or secret is stored in this app.

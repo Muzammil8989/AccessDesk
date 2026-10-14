@@ -1,6 +1,7 @@
 import type { OnboardResult, OnboardStep, OnboardingStepName } from '@accessdesk/shared';
 import {
   Check,
+  ChevronRight,
   CircleCheck,
   CircleMinus,
   CircleX,
@@ -10,9 +11,11 @@ import {
   RotateCw,
   TriangleAlert,
   UserPlus,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -68,48 +71,61 @@ const STATUS_BADGES: Record<
   skipped: { label: 'Skipped', variant: 'secondary', icon: CircleMinus },
 };
 
-const STEP_DOTS: Record<OnboardStep['status'], string> = {
-  done: 'bg-success/15 text-success',
-  failed: 'bg-destructive/15 text-destructive',
-  skipped: 'bg-muted text-muted-foreground',
+/** The step icon is drawn bare, with no background: only its colour tells the states apart. */
+const STEP_ICON_COLOURS: Record<OnboardStep['status'], string> = {
+  done: 'text-success',
+  failed: 'text-error',
+  skipped: 'text-on-surface-variant',
 };
 
 /** How long "Copied" stays before the button goes back to "Copy". */
 const COPIED_RESET_MS = 3000;
 
-function PasswordBlock({ password }: { password: string }) {
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+type CopyKind = 'password' | 'details';
+
+function PasswordBlock({ username, password }: { username: string; password: string }) {
+  const [copied, setCopied] = useState<CopyKind | null>(null);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [revealed, setRevealed] = useState(false);
 
   useEffect(() => {
-    if (copyState !== 'copied') return;
-    const timer = setTimeout(() => setCopyState('idle'), COPIED_RESET_MS);
+    if (copied === null) return;
+    const timer = setTimeout(() => setCopied(null), COPIED_RESET_MS);
     return () => clearTimeout(timer);
-  }, [copyState]);
+  }, [copied]);
 
-  async function copy() {
+  async function copy(kind: CopyKind) {
+    const text =
+      kind === 'password'
+        ? password
+        : `Username: ${username}\nTemporary password: ${password}\nChoose a new password the first time you sign in.`;
     try {
-      await navigator.clipboard.writeText(password);
-      setCopyState('copied');
+      await navigator.clipboard.writeText(text);
+      setCopyFailed(false);
+      setCopied(kind);
       // The toast region is a live region, so this is also what screen readers announce.
-      toast.success('Password copied to the clipboard');
+      toast.success(
+        kind === 'password'
+          ? 'Password copied to the clipboard'
+          : 'Sign-in details copied to the clipboard',
+      );
     } catch {
-      setCopyState('failed');
+      setCopyFailed(true);
     }
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <h3 id="password-heading" className="text-sm font-semibold">
+    <div className="flex flex-col gap-3 rounded-md bg-surface-container-highest p-4">
+      <h3 id="password-heading" className="text-title-small">
         Temporary password
       </h3>
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2 pl-4">
+      <div className="flex flex-wrap items-center gap-2 rounded-sm bg-surface p-2 pl-4">
         {/* Blurred until revealed, so a glance over the shoulder reads nothing. The text stays
             in the page for screen readers and for selecting. */}
         <output
           aria-labelledby="password-heading"
           className={cn(
-            'min-w-0 flex-1 truncate font-mono text-lg tracking-wider transition-[filter] duration-150 ease-standard',
+            'min-w-0 flex-1 truncate font-mono text-xl tracking-wider transition-[filter] duration-150 ease-standard',
             revealed ? 'select-all' : 'blur-[6px] select-none',
           )}
         >
@@ -118,26 +134,31 @@ function PasswordBlock({ password }: { password: string }) {
         <Button
           type="button"
           variant="ghost"
-          size="sm"
           aria-pressed={revealed}
           onClick={() => setRevealed((value) => !value)}
         >
           {revealed ? <EyeOff /> : <Eye />}
           Reveal
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => void copy()}>
-          {copyState === 'copied' ? <Check className="text-success" /> : <Copy />}
-          {copyState === 'copied' ? 'Copied' : 'Copy'}
+        <Button type="button" onClick={() => void copy('password')}>
+          {copied === 'password' ? <Check /> : <Copy />}
+          {copied === 'password' ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      <div>
+        <Button type="button" variant="outline" size="sm" onClick={() => void copy('details')}>
+          {copied === 'details' ? <Check className="text-success" /> : <Copy />}
+          {copied === 'details' ? 'Sign-in details copied' : 'Copy sign-in details'}
         </Button>
       </div>
       <Alert variant="warning">
         <AlertTitle>Save this password now</AlertTitle>
         <AlertDescription>
-          This password is shown only once and will not be shown again. Copy it now and share it
-          securely. The employee must choose a new password the first time they sign in.
+          It is shown once and will not be shown again. Share it securely. They choose a new
+          password the first time they sign in.
         </AlertDescription>
       </Alert>
-      {copyState === 'failed' && (
+      {copyFailed && (
         <Alert variant="destructive" role="alert">
           <AlertDescription className="mt-0 text-foreground">
             Could not copy automatically. Select the password and copy it by hand.
@@ -163,6 +184,9 @@ export function OnboardResultView({
   const showChecklist =
     checklistStep !== undefined &&
     (checklistStep.status === 'done' || (checklistStep.status === 'skipped' && complete));
+  const doneSteps = result.steps.filter((step) => step.status === 'done').length;
+  // Everything went well: the steps are a record, not something to act on, so they start closed.
+  const stepsOpen = result.steps.some((step) => step.status !== 'done');
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -181,18 +205,15 @@ export function OnboardResultView({
 
   return (
     <Card className="gap-0 py-0">
-      <CardHeader className="flex-row items-center gap-4 border-b py-5">
-        <span
-          aria-hidden="true"
-          className={cn(
-            'flex size-11 shrink-0 items-center justify-center rounded-full',
-            complete ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning',
-          )}
-        >
-          {complete ? <CircleCheck className="size-5" /> : <TriangleAlert className="size-5" />}
-        </span>
+      <CardHeader className="flex-row items-center gap-4 border-b border-outline-variant py-5">
+        {/* A plain icon: no background behind it. */}
+        {complete ? (
+          <CircleCheck className="size-8 shrink-0 text-success" aria-hidden="true" />
+        ) : (
+          <TriangleAlert className="size-8 shrink-0 text-warning" aria-hidden="true" />
+        )}
         <div className="flex min-w-0 flex-col gap-1.5">
-          <CardTitle ref={headingRef} tabIndex={-1} className="text-xl outline-none">
+          <CardTitle ref={headingRef} tabIndex={-1} className="outline-none">
             {complete ? 'Employee onboarded' : 'Onboarding is not finished'}
           </CardTitle>
           <CardDescription>
@@ -205,20 +226,27 @@ export function OnboardResultView({
 
       <CardContent className="grid items-start gap-8 py-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-6">
-          {password && <PasswordBlock password={password} />}
+          {password && <PasswordBlock username={summary.username} password={password} />}
 
           {showChecklist && <ChecklistPanel subjectId={result.subjectId} headingLevel={3} />}
           {checklistStep && !showChecklist && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-body-medium text-on-surface-variant">
               The checklist is created once every step has finished.
             </p>
           )}
 
-          <section aria-labelledby="steps-heading" className="flex flex-col gap-3">
-            <h3 id="steps-heading" className="text-sm font-semibold">
+          <details open={stepsOpen} className="group/steps">
+            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-sm text-title-small outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
+              <ChevronRight
+                className="size-5 text-on-surface-variant transition-transform duration-150 ease-standard group-open/steps:rotate-90"
+                aria-hidden="true"
+              />
               Steps
-            </h3>
-            <ul aria-label="Onboarding steps" className="flex flex-col">
+              <span className="text-body-medium text-on-surface-variant">
+                {doneSteps} of {result.steps.length} done
+              </span>
+            </summary>
+            <ul aria-label="Onboarding steps" className="mt-3 flex flex-col">
               {result.steps.map((step, index) => {
                 const badge = STATUS_BADGES[step.status];
                 return (
@@ -228,27 +256,27 @@ export function OnboardResultView({
                   >
                     <span
                       aria-hidden="true"
-                      className="absolute top-7 bottom-0 left-3 w-px -translate-x-1/2 bg-border group-last:hidden"
+                      className="absolute top-8 bottom-0 left-2.5 w-px -translate-x-1/2 bg-outline-variant group-last:hidden"
                     />
-                    <span
-                      aria-hidden="true"
+                    <badge.icon
                       className={cn(
-                        'relative flex size-6 shrink-0 items-center justify-center rounded-full',
-                        STEP_DOTS[step.status],
+                        'relative mt-0.5 size-5 shrink-0',
+                        STEP_ICON_COLOURS[step.status],
                       )}
-                    >
-                      <badge.icon className="size-3.5" />
-                    </span>
-                    <div className="flex min-w-0 flex-1 items-start justify-between gap-4 text-sm">
+                      aria-hidden="true"
+                    />
+                    <div className="flex min-w-0 flex-1 items-start justify-between gap-4 text-body-medium">
                       <div className="min-w-0 pt-0.5">
-                        <span className="font-medium">{STEP_LABELS[step.name]}</span>
+                        <span className="text-label-large">{STEP_LABELS[step.name]}</span>
                         {step.label && (
-                          <span className="ml-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                          <span className="ml-2 rounded-xs bg-surface-container-highest px-1.5 py-0.5 font-mono text-label-medium">
                             {step.label}
                           </span>
                         )}
                         {step.message && (
-                          <span className="mt-0.5 block text-muted-foreground">{step.message}</span>
+                          <span className="mt-0.5 block text-on-surface-variant">
+                            {step.message}
+                          </span>
                         )}
                       </div>
                       <Badge variant={badge.variant} className="shrink-0">
@@ -260,18 +288,18 @@ export function OnboardResultView({
                 );
               })}
             </ul>
-          </section>
+          </details>
         </div>
 
         <div className="flex flex-col gap-3">
-          <h3 className="text-sm font-semibold">Details</h3>
-          <dl className="divide-y rounded-lg border px-4 text-sm">
+          <h3 className="text-title-small">Details</h3>
+          <dl className="divide-y divide-outline-variant rounded-md border border-outline-variant px-4 text-body-medium">
             {details.map((row) => (
               <div key={row.label} className="flex items-baseline justify-between gap-4 py-2.5">
-                <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+                <dt className="shrink-0 text-on-surface-variant">{row.label}</dt>
                 <dd
                   className={cn(
-                    'min-w-0 text-right font-medium',
+                    'min-w-0 text-right text-label-large',
                     row.breakAll ? 'break-all' : 'break-words',
                   )}
                 >
@@ -281,18 +309,24 @@ export function OnboardResultView({
             ))}
           </dl>
           {summary.startDate && (
-            <p className="text-xs text-muted-foreground">{START_DATE_NOTE_SAVED}</p>
+            <p className="text-body-small text-on-surface-variant">{START_DATE_NOTE_SAVED}</p>
           )}
         </div>
       </CardContent>
 
-      <CardFooter className="flex-col items-stretch gap-4 border-t py-4">
+      <CardFooter className="flex-col items-stretch gap-4 border-t border-outline-variant py-4">
         {retryError && (
           <Alert variant="destructive" role="alert">
             <AlertDescription className="mt-0 text-foreground">{retryError}</AlertDescription>
           </Alert>
         )}
-        <div className="flex justify-end gap-3">
+        <div className="flex flex-wrap justify-end gap-3">
+          <Button asChild variant="ghost">
+            <Link to={`/employees?q=${encodeURIComponent(summary.username)}`}>
+              <Users />
+              View in Employees
+            </Link>
+          </Button>
           {!complete && (
             <Button type="button" onClick={onRetry} disabled={retrying}>
               <RotateCw className={cn(retrying && 'animate-spin')} />

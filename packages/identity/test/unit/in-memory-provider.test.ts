@@ -68,6 +68,60 @@ describe('in-memory provider test controls', () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
+  it('stops a group or role list at the cap and says so, keeping total honest', async () => {
+    const fake = createInMemoryIdentityProvider({ memberFilterCap: 2 });
+    const groupId = fake.seedGroup('Sales');
+    fake.seedRole('member');
+    for (const username of ['ann', 'bob', 'cy']) {
+      const subjectId = await fake.provider.createUser({ username });
+      await fake.provider.addUserToGroup(subjectId, groupId);
+      await fake.provider.addUserRoles(subjectId, ['member']);
+    }
+
+    const byGroup = await fake.provider.listUsersPage({ groupId });
+    const byRole = await fake.provider.listUsersPage({ role: 'member' });
+    const everyone = await fake.provider.listUsersPage();
+
+    expect(byGroup).toMatchObject({ total: 2, capped: true });
+    expect(byGroup.users.map((u) => u.username)).toEqual(['ann', 'bob']);
+    expect(byRole).toMatchObject({ total: 2, capped: true });
+    expect(everyone).toMatchObject({ total: 3, capped: false });
+  });
+
+  it('is not capped when a list has exactly as many members as the cap', async () => {
+    const fake = createInMemoryIdentityProvider({ memberFilterCap: 2 });
+    const groupId = fake.seedGroup('Sales');
+    for (const username of ['ann', 'bob']) {
+      await fake.provider.addUserToGroup(await fake.provider.createUser({ username }), groupId);
+    }
+
+    expect(await fake.provider.listUsersPage({ groupId })).toMatchObject({
+      total: 2,
+      capped: false,
+    });
+  });
+
+  it('marks a seeded role as built in only when asked', async () => {
+    const fake = createInMemoryIdentityProvider();
+    fake.seedRole('developer');
+    fake.seedRole('offline_access', { builtin: true });
+
+    const roles = await fake.provider.listRoles();
+
+    expect(roles.map((r) => [r.name, r.builtin]).sort()).toEqual([
+      ['developer', false],
+      ['offline_access', true],
+    ]);
+  });
+
+  it('fails a user list on demand', async () => {
+    const fake = createInMemoryIdentityProvider();
+    fake.failNext('listUsersPage', new IdentityProviderError(503, 'down'));
+
+    await expect(fake.provider.listUsersPage()).rejects.toMatchObject({ status: 503 });
+    await expect(fake.provider.listUsersPage()).resolves.toMatchObject({ total: 0 });
+  });
+
   it('rejects group and role operations that name something unknown', async () => {
     const fake = createInMemoryIdentityProvider();
     const subjectId = await fake.provider.createUser({ username: 'ann' });

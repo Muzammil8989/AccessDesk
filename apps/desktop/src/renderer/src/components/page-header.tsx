@@ -26,11 +26,13 @@ export function PageHeader({
         <h1
           ref={heading}
           tabIndex={focusOnMount ? -1 : undefined}
-          className="text-2xl font-semibold tracking-tight outline-none"
+          className="text-headline-small outline-none"
         >
           {title}
         </h1>
-        {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+        {description && (
+          <p className="mt-1 text-body-medium text-on-surface-variant">{description}</p>
+        )}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </header>
