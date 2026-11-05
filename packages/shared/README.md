@@ -4,8 +4,10 @@ Zod schemas and TypeScript types used by both the desktop app and the API, so bo
 same shapes. The provider-neutral identity interface is in `@accessdesk/identity`, not here.
 
 ```
-src/employee.ts   employee view, list query, pagination limits
-src/template.ts   onboarding template (department, default role, items) and its role check
+src/employee.ts   employee view and detail (groups, roles), list query and filters, filter options,
+                  pagination limits
+src/template.ts   onboarding template (department, default role, items, the isDefault flag) and its
+                  role check (templateViolation)
 src/settings.ts   local desktop settings: issuer URL, client ID, API URL (public values only)
 src/error.ts      API error shape
 src/onboarding.ts   onboarding input (template, manager, start date), options and result schemas

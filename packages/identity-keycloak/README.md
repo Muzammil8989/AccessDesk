@@ -8,16 +8,17 @@ const identity = createKeycloakIdentityProvider({
   issuerUrl: 'https://sso.example.com/realms/company-platform',
   getToken: () => adminAccessToken, // the logged-in admin's own token
 });
-const users = await identity.listUsers({ search: 'ann', first: 0, max: 20 });
+const page = await identity.listUsersPage({ search: 'ann', first: 0, max: 20 }); // { users, total, capped }
 ```
 
-Operations: `listUsers`, `countUsers`, `findUsers` (exact username or email), `getUser`, `createUser`
+Operations: `listUsersPage` (search, enabled, and an optional group or role filter, with a total and a
+`capped` flag), `findUsers` (exact username or email), `getUser`, `createUser`
 (optionally with `emailVerified` and a temporary `initialPassword`), `disableUser`, `endAllSessions`,
 `listGroups`, `getUserGroups`, `addUserToGroup`, `removeUserFromGroup`, `listRoles`, `getUserRoles`,
 `addUserRoles`, `removeUserRoles`. Failures throw `IdentityProviderError` (with the HTTP status, never
 the token).
 
-**What is specific to this provider, and only in `src/keycloak-api.ts`:**
+**What is specific to this provider (in `src/keycloak-api.ts`, unless noted):**
 
 - The admin API's base URL and realm are derived from the issuer URL, which must end in
   `/realms/<realm>` (an optional path prefix before `/realms` is kept). The factory throws at once, with
@@ -25,10 +26,16 @@ the token).
 - The admin API paths, and the raw JSON shapes of users, groups and roles.
 - Roles are realm roles, and are looked up by name to get their IDs before assigning or removing them.
 - Creation timestamps are epoch milliseconds, converted to a `Date` in `identity-provider.ts`.
+- A group or role filter reads the group's members or the role's holders, up to 2000 people
+  (`DEFAULT_MEMBER_FILTER_CAP`); past that the page is marked `capped`. `identity-provider.ts` then
+  filters them by search and status, and sorts them.
+- Built-in roles (`offline_access`, `uma_authorization`, `default-roles-<realm>`) are marked as such in
+  `identity-provider.ts`.
 
 ```
 src/keycloak-api.ts       raw admin API: paths, raw shapes, issuer parsing
-src/identity-provider.ts  maps raw shapes to the neutral types (mapUser and friends)
+src/identity-provider.ts  maps raw shapes to the neutral types, marks built-in roles, filters group and
+                          role members by search and status
 test/unit/                keycloak-api.test.ts (exact calls on the wire), identity-provider.test.ts (mapping)
 test/integration/         the shared IdentityProvider contract, against an in-memory fake of the admin API
 test/helpers/             the fake admin API (a stateful fetch) and mock-fetch helpers

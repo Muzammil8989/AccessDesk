@@ -33,14 +33,14 @@ of the code only knows a provider-neutral interface.
 - TypeScript 6.0.3 everywhere, strict mode, `noUncheckedIndexedAccess`. (Not 7: typescript-eslint
   8.71.1 supports TypeScript below 6.1.)
 - Monorepo: pnpm 12.9.1 workspaces + Turborepo 2.11.7. Node 22.22.1 or newer (`.nvmrc` says 24).
-- `apps/desktop`: Electron 44.5.1, electron-vite 5.0.0, Vite 7.3.7 (electron-vite 5 does not support
+- `apps/desktop`: Electron 44.9.3, electron-vite 5.0.0, Vite 7.3.7 (electron-vite 5 does not support
   Vite 8), React 19.3.0, `@vitejs/plugin-react` 5.2.0, Tailwind 4.3.3, shadcn/ui-style components
   (hand-written: Radix Slot, Label and Tooltip, class-variance-authority, clsx, tailwind-merge,
-  lucide-react), React Hook Form 7.89.0 with `@hookform/resolvers`, Zod 4.6.5, TanStack Query 5.104.1,
+  lucide-react), React Hook Form 7.89.0 with `@hookform/resolvers`, Zod 4.6.6, TanStack Query 5.104.1,
   React Router 8.4.0 (hash router). Roboto Flex Variable is bundled locally
   (`@fontsource-variable/roboto-flex`): the CSP is `font-src 'self'` and the app must work offline.
   Design tokens and rules are in `design-system/accessdesk/MASTER.md`.
-- `apps/api`: Node.js, Fastify 5.12.5, `@fastify/helmet`, `@fastify/rate-limit`, Prisma **7.10.0**
+- `apps/api`: Node.js, Fastify 5.12.6, `@fastify/helmet`, `@fastify/rate-limit`, Prisma **7.10.0**
   (stable; npm's `latest` tag is an 8.0 release candidate) with `@prisma/adapter-pg`, pg-boss 12.37.0
   (stub), jose 6.2.12, pino (through Fastify) with pino-pretty in development, tsup for the build.
 - `packages/shared`: Zod schemas, TypeScript types and role permissions used by desktop and API.
@@ -195,7 +195,7 @@ Seven tables, snake_case through `@@map`: `onboarding_templates`, `template_item
   template the tasks came from. Only the three onboarding routes (`GET /onboarding/options`, `POST /onboarding`,
   `POST /onboarding/:subjectId/retry`) are limited to 20 requests a minute per IP, per route. The
   checklist routes have no limit of their own and fall under the global limit (default 300 a minute).
-  Both groups answer with `Cache-Control: no-store`. Error codes: `username_exists` and `email_exists`
+  The employee, onboarding and checklist routes all answer with `Cache-Control: no-store`. Error codes: `username_exists` and `email_exists`
   (`409`), `unknown_manager` and `manager_disabled` (`400`), `checklist_has_tasks` (`409`).
 - **Onboarding.** `OnboardingService` builds a list of step objects and runs them through `runSteps`; an
   observer writes one audit row per step. The steps are `create_user`, `add_to_group`, `assign_role`, then
@@ -237,8 +237,8 @@ Seven tables, snake_case through `@@map`: `onboarding_templates`, `template_item
   **information only**: the account is created and enabled at once, and nothing is scheduled (see the
   open question on scheduled actions below).
 - **Layers and dependency injection.** Routes only handle HTTP. `EmployeesService` depends on the
-  `IdentityProvider` interface. Templates use a `TemplateRepository` interface with a Prisma
-  implementation. `buildApp(deps)` takes `{ config, templates, audit, identityFor, checkDatabase,
+  `IdentityProvider` interface. Templates use a `TemplateRepository` interface (`listWithItems`, `findById`,
+  `findDefault`) with a Prisma implementation. `buildApp(deps)` takes `{ config, templates, audit, checklists, identityFor, checkDatabase,
 keyResolver?, fetch?, clock?, generatePassword?, logStream? }`, where `identityFor` is an `IdentityProviderFactory`: `(adminAccessToken) => IdentityProvider`.
   `server.ts` is the only place that picks real implementations (through
   `createIdentityProviderFactory` in `infra/identity.ts`, which chooses the adapter by
@@ -426,12 +426,18 @@ are tested, but no API route uses them yet.
 
 ### Repo automation
 
-`pnpm setup` (env file, PostgreSQL, migrations, seed), `pnpm dev:all` (database, migrations, then API and
+`pnpm run setup` (env file, PostgreSQL, migrations, seed; plain `pnpm setup` is pnpm's own command), `pnpm dev:all` (database, migrations, then API and
 app), `pnpm dev`, `pnpm check` (lint, naming check, format check, typecheck, tests, build; coverage floors run in
 `pnpm test:coverage` and in CI), `pnpm test:coverage`,
 `pnpm test:e2e`, `pnpm clean`, `pnpm db:up`, `pnpm db:down`, `pnpm db:migrate` (creates a migration), and `pnpm --filter @accessdesk/api db:deploy`
-(applies existing migrations to a database). Git hooks: pre-commit runs
-lint-staged, pre-push runs typecheck and tests.
+(applies existing migrations to a database), `pnpm format:check` and `pnpm --filter @accessdesk/api db:seed`
+(adds only the templates that are missing). Git hooks: pre-commit runs lint-staged, pre-push runs
+typecheck and tests. Neither the hooks nor `pnpm check` run the database tests, the coverage floors or
+`pnpm audit`, so `docs/development.md` ("Before you merge") lists the full routine to run before a pull
+request is merged: up to date with `origin/main`, `TEST_DATABASE_URL` set, the CI steps in order with
+`turbo run ... --force` (no cached results), `pnpm test:e2e`, `pnpm audit --audit-level high` and a
+review of the diff against `docs/security.md`. "Before a release" adds the changelog, version bumps, a
+check of each new migration, the docs and a green CI run on `main`.
 
 ## Quality rules
 
@@ -441,9 +447,10 @@ lint-staged, pre-push runs typecheck and tests.
   (`@accessdesk/identity-*`); the identity provider admin path (`/admin/realms`) may only appear in
   `packages/identity-*`. The naming check (`scripts/check-naming.mjs`) is part of `pnpm check`. Also: type-aware rules (no floating promises), accessibility rules for JSX, `eqeqeq`, no `console` in
   production code.
-- **Tests never need a real identity provider. They need a database only in three places** (each is skipped
+- **Tests never need a real identity provider. They need a database only in four places** (each is skipped
   without `TEST_DATABASE_URL`, and CI sets it): the migration tests, the real-database checklist repository
-  tests (the tick and close transactions, the row lock) and the end-to-end test. API tests sign real JWTs with a local key
+  tests (the tick and close transactions, the row lock), the real-database template repository test
+  (finding the default template) and the end-to-end test. API tests sign real JWTs with a local key
   set, and every adapter must pass the shared contract test (`runIdentityProviderContract`). The
   e2e test starts a mock identity provider (discovery, JWKS, PKCE-verifying token endpoint, a few admin
   endpoints including the role list and one user), the **real built API** and the **real built Electron
@@ -529,6 +536,13 @@ lint-staged, pre-push runs typecheck and tests.
   information.
 - The loopback redirect `http://127.0.0.1/callback` with any port is verified on the identity
   provider version in use. Other versions are untested. See `docs/keycloak-setup.md`.
+- **One moderate audit advisory is left.** On 5 November 2026 the 35 advisories reported on
+  2 November were fixed with patch updates (zod, electron, fastify) and overrides (undici, fast-uri,
+  ip-address); vite 8 and the zod under `eslint-plugin-react-hooks` were moved to patched versions in
+  the lockfile only, because an override would also rewrite their peer ranges. `pnpm audit --audit-level
+high` passes. Left: `minimatch` (GHSA-g3hv-75wg-m249, moderate), used only by eslint at lint time. The
+  fix is only in minimatch 11 and eslint 10 asks for `^10`, so it waits for eslint. It is not on an
+  allowlist.
 - Packaging and installers, the web build, an API Dockerfile and Playwright specs (one end-to-end
   script exists) are not done. The e2e test is not in CI because it needs a display.
 
@@ -576,8 +590,9 @@ In this order:
 
 - `pnpm check` and `pnpm test:coverage` pass.
 - `pnpm test:e2e` passes (with `TEST_DATABASE_URL` set, so the onboarding retry scenario runs too).
-- `pnpm audit` reports no known vulnerabilities.
-- `pnpm setup` then `pnpm dev:all` starts the database, the API and the app. The first launch shows the
+- `pnpm audit` reports no known vulnerabilities (CI's `audit` job fails on high or critical:
+  `pnpm audit --audit-level high`).
+- `pnpm run setup` then `pnpm dev:all` starts the database, the API and the app. The first launch shows the
   setup wizard.
 - An account with `hr-admin` or `super-admin` sees the full app. An account without either sees only
   the no-access page.

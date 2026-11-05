@@ -3,8 +3,8 @@
 Fastify API. It verifies the admin's access token on every request (signing keys found through OIDC
 discovery), requires one of the configured admin roles (default `super-admin` or `hr-admin`, read from
 `realm_access.roles`), and calls the identity provider with that same token. Modules depend only on the
-`IdentityProvider` interface from `@accessdesk/identity`; `server.ts` picks the adapter named by
-`IDENTITY_PROVIDER` ([ADR 0007](../../docs/adr/0007-identity-provider-interface.md),
+`IdentityProvider` interface from `@accessdesk/identity`; `infra/identity.ts` (called from `server.ts`)
+picks the adapter named by `IDENTITY_PROVIDER` ([ADR 0007](../../docs/adr/0007-identity-provider-interface.md),
 [ADR 0009](../../docs/adr/0009-provider-neutral-naming.md)).
 
 ```
@@ -12,27 +12,28 @@ src/config/     environment parsing and validation (Zod)
 src/infra/      real implementations: database client (Prisma + pg adapter), the `IdentityProviderFactory` type and the adapter choice,
                 job queue stub (pg-boss)
 src/modules/    one folder per feature (audit, checklists, employees, health, onboarding, templates), each with its own layers
-src/plugins/    auth (JWT + role guard) and the error handler
+src/plugins/    auth (JWT + role guard), jwks (signing keys through OIDC discovery) and the error handler
 prisma/         schema.prisma, migrations, seed
 test/           unit/, integration/ (HTTP tests with app.inject()), helpers/
 ```
 
-| Command (from the repo root)               | What it does                            |
-| ------------------------------------------ | --------------------------------------- |
-| `pnpm --filter @accessdesk/api dev`        | Run with auto-reload                    |
-| `pnpm --filter @accessdesk/api test`       | Run the tests                           |
-| `pnpm --filter @accessdesk/api db:migrate` | Create and apply a migration (dev)      |
-| `pnpm --filter @accessdesk/api db:deploy`  | Apply existing migrations               |
-| `pnpm --filter @accessdesk/api db:seed`    | Seed the Developer, Sales, HR templates |
+| Command (from the repo root)               | What it does                                                                         |
+| ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `pnpm --filter @accessdesk/api dev`        | Run with auto-reload                                                                 |
+| `pnpm --filter @accessdesk/api test`       | Run the tests                                                                        |
+| `pnpm --filter @accessdesk/api db:migrate` | Create and apply a migration (dev)                                                   |
+| `pnpm --filter @accessdesk/api db:deploy`  | Apply existing migrations                                                            |
+| `pnpm --filter @accessdesk/api db:seed`    | Seed the templates: General onboarding (the default checklist), Developer, Sales, HR |
 
 Routes: `GET /health` and `GET /ready` (public probes), `GET /templates`, `GET /employees`,
-`GET /employees/:id`, the onboarding routes `GET /onboarding/options`, `POST /onboarding` and
+`GET /employees/filter-options` (groups and roles for the filters), `GET /employees/:id`, the onboarding routes `GET /onboarding/options`, `POST /onboarding` and
 `POST /onboarding/:subjectId/retry` ([ADR 0010](../../docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md),
 [ADR 0011](../../docs/adr/0011-onboarding-part-2-templates-checklists-manager-start-date.md)), and the
 checklist routes `GET /checklists`, `GET /checklists/:subjectId`,
 `PATCH /checklists/:subjectId/items/:itemId` (tick a task) and `PATCH /checklists/:subjectId` (close or
 reopen one that has no tasks). The onboarding routes are limited to 20 requests a minute per IP, and
-both groups are sent with `Cache-Control: no-store`. `POST /onboarding` answers `201`, or `207` when a
+`GET /employees` to 240 (90 with a group or role filter, counted separately). The employees,
+onboarding and checklist routes are all sent with `Cache-Control: no-store`. `POST /onboarding` answers `201`, or `207` when a
 step after creating the user failed. One shared rule decides which roles onboarding may assign: `owner`
 and the `AUTH_SUPER_ADMIN_ROLE` role never, `admin` and the `AUTH_ADMIN_ROLES` roles only for a super-admin.
 

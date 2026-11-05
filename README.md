@@ -124,7 +124,7 @@ Run all commands from the repository root.
 | `pnpm run setup`                          | One-time setup: `.env`, PostgreSQL, migrations, seed                      |
 | `pnpm dev:all`                            | Database, migrations, then API and desktop app                            |
 | `pnpm dev`                                | API and desktop app only (database already running)                       |
-| `pnpm check`                              | Everything CI runs: lint, naming check, format, typecheck, test, build    |
+| `pnpm check`                              | Lint, naming check, format, typecheck, test, build                        |
 | `pnpm test`                               | Unit and integration tests in every package                               |
 | `pnpm test:coverage`                      | Tests with a coverage report and minimum thresholds                       |
 | `pnpm test:e2e`                           | Build, then an end-to-end test (mock identity provider, real API and app) |
@@ -137,8 +137,9 @@ retry, template and checklist, and manager scenarios: the runner creates a throw
 and drops it afterwards. Without one, onboarding ends partial because the checklist step needs the
 database.
 
-The full list, with the Git hooks and testing conventions, is in the
-[development guide](docs/development.md).
+CI also enforces coverage, runs the database tests and runs `pnpm audit`. The full list of commands,
+the Git hooks, the testing conventions and the checklist to run before you merge are in the
+[development guide](docs/development.md#before-you-merge).
 
 ## Architecture
 
@@ -196,15 +197,15 @@ tree and the testing conventions are in the [development guide](docs/development
 
 ## Tech stack
 
-| Area     | Technology                                                                          |
-| -------- | ----------------------------------------------------------------------------------- |
-| Desktop  | Electron, electron-vite, React, React Router, TanStack Query, React Hook Form       |
-| UI       | Tailwind CSS, shadcn/ui-style components, Radix UI, Inter (bundled), light and dark |
-| API      | Fastify, Zod, Prisma, pg-boss (scheduled jobs, not wired up yet)                    |
-| Database | PostgreSQL 16                                                                       |
-| Identity | OpenID Connect (Authorization Code + PKCE) through a provider adapter               |
-| Tooling  | TypeScript (strict), pnpm workspaces, Turborepo, Vitest, Playwright                 |
-| Quality  | ESLint (type-aware, accessibility and architecture-boundary rules), Prettier, Husky |
+| Area     | Technology                                                                                |
+| -------- | ----------------------------------------------------------------------------------------- |
+| Desktop  | Electron, electron-vite, React, React Router, TanStack Query, React Hook Form             |
+| UI       | Tailwind CSS, shadcn/ui-style components, Radix UI, Roboto Flex (bundled), light and dark |
+| API      | Fastify, Zod, Prisma, pg-boss (scheduled jobs, not wired up yet)                          |
+| Database | PostgreSQL 16                                                                             |
+| Identity | OpenID Connect (Authorization Code + PKCE) through a provider adapter                     |
+| Tooling  | TypeScript (strict), pnpm workspaces, Turborepo, Vitest, Playwright                       |
+| Quality  | ESLint (type-aware, accessibility and architecture-boundary rules), Prettier, Husky       |
 
 ## Project status
 
@@ -217,11 +218,11 @@ tree and the testing conventions are in the [development guide](docs/development
   Settings). The UI has a light, dark or system theme (saved locally), a sidebar that collapses,
   toast messages and loading skeletons. Its tokens and rules are in the
   [design system](design-system/accessdesk/MASTER.md).
-- Employees list with search, pagination, and loading, empty and error states (desktop to API to
-  identity provider)
+- Employees list with search, status, group and role filters (direct members only), pagination, and
+  loading, empty and error states (desktop to API to identity provider)
 - Employee detail (read only): the profile and the groups and roles a person holds directly, opened
   from a name in the Employees list
-- API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/:id` (the
+- API: `GET /health`, `GET /ready`, `GET /templates`, `GET /employees`, `GET /employees/filter-options`, `GET /employees/:id` (the
   profile with the groups and roles held directly), and the onboarding and checklist routes below
 - Onboarding ([ADR 0010](docs/adr/0010-onboarding-no-rollback-guarded-retry-one-time-password.md),
   [ADR 0011](docs/adr/0011-onboarding-part-2-templates-checklists-manager-start-date.md)): the Onboard
@@ -238,11 +239,14 @@ tree and the testing conventions are in the [development guide](docs/development
     page), `GET /checklists/:subjectId` and two `PATCH` routes to tick a task and to close one that has no
     tasks. A tick and its audit row are one
     transaction. They are never created as done. Names are looked up live; only the `subjectId` is saved.
+    The Checklists screens (under Onboard) list open and done checklists, tick tasks, and show which
+    template the tasks came from.
   - **Manager and start date.** The manager is picked with the Employees search and checked before
     anything is created. The start date is **information only**: the account is enabled at once.
   - **Tested against fakes and a mock identity provider only; not yet run against a real identity
     provider.** The checks to run are in the [provider setup guide](docs/keycloak-setup.md).
-- PostgreSQL schema, first migration and seed
+- PostgreSQL schema, migrations and a seed (the General onboarding default template plus Developer,
+  Sales and HR; it only adds templates that are missing)
 - `packages/identity` (the provider-neutral interface) and `packages/identity-keycloak` (its adapter),
   with unit and contract tests (mocked `fetch`)
 

@@ -20,14 +20,18 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Qu
 
 ```bash
 pnpm install
-pnpm setup      # .env, PostgreSQL, migrations, seed
+pnpm run setup  # .env, PostgreSQL, migrations, seed
 pnpm dev:all    # API + desktop app
 ```
 
 ## Before you open a pull request
 
-Run `pnpm check`. It runs the same steps as CI: lint, format check, typecheck, tests and build.
-Git hooks (Husky) help: pre-commit lints and formats staged files, and pre-push runs typecheck and tests.
+Run `pnpm check`. It runs lint, naming check, format check, typecheck, tests and build. Git hooks
+(Husky) help: pre-commit lints and formats staged files, and pre-push runs typecheck and tests.
+
+CI also runs the database tests, the coverage thresholds and `pnpm audit`. To run everything CI runs,
+plus the end-to-end test, before you push, follow
+[Before you merge](docs/development.md#before-you-merge) in the development guide.
 
 ## Rules
 
