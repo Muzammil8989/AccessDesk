@@ -4,6 +4,16 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Security
+
+- **Dependency audit fixed.** `pnpm audit` reported 35 advisories (11 high). Patch updates: zod 4.6.6,
+  Electron 44.9.3 and Fastify 5.12.6. New overrides in `pnpm-workspace.yaml`, each inside the parent's
+  major version: undici 8.12.2 and 7.30.1, fast-uri 3.1.9 and 4.2.3, ip-address 10.7.4. vite 8.3.3 (under
+  vitest) and the zod under `eslint-plugin-react-hooks` are updated in the lockfile only, because an
+  override also rewrites peer ranges and would break the desktop app's vite 7. `pnpm audit --audit-level
+high` passes. One moderate advisory is left: `minimatch` under eslint (lint only), fixed only in
+  minimatch 11, which eslint 10 does not accept yet.
+
 ### Changed
 
 - **Every onboarding creates a checklist.** Before, no checklist was made when there was no template, or
