@@ -11,10 +11,10 @@
 
 | Command                                   | What it does                                                                 |
 | ----------------------------------------- | ---------------------------------------------------------------------------- |
-| `pnpm setup`                              | One-time: create `.env`, start PostgreSQL, migrate, seed                     |
+| `pnpm run setup`                          | One-time: `.env`, PostgreSQL, migrate, seed (`pnpm setup` is pnpm's own)     |
 | `pnpm dev:all`                            | Start the database, apply migrations, then run the API and the app           |
 | `pnpm dev`                                | Run the API and the desktop app (database must already be running)           |
-| `pnpm check`                              | Everything CI runs: lint, naming check, format check, typecheck, test, build |
+| `pnpm check`                              | Lint, naming, format check, typecheck, test, build (CI runs more, see below) |
 | `pnpm test`                               | Unit and integration tests in every package                                  |
 | `pnpm test:coverage`                      | The same, with a coverage report and minimum thresholds                      |
 | `pnpm test:e2e`                           | Build, then run the end-to-end test (opens the app window)                   |
@@ -23,10 +23,12 @@
 | `pnpm typecheck`                          | TypeScript strict mode in every package                                      |
 | `pnpm build`                              | Build everything                                                             |
 | `pnpm audit`                              | Check dependencies for known vulnerabilities                                 |
-| `pnpm format`                             | Prettier                                                                     |
+| `pnpm format`                             | Prettier (rewrites files)                                                    |
+| `pnpm format:check`                       | Prettier in check mode, as CI runs it                                        |
 | `pnpm db:up/down`                         | Start or stop PostgreSQL                                                     |
 | `pnpm db:migrate`                         | Create and apply a new migration after editing `schema.prisma`               |
 | `pnpm --filter @accessdesk/api db:deploy` | Apply existing migrations to a database (do this after pulling)              |
+| `pnpm --filter @accessdesk/api db:seed`   | Add the seed templates that are missing (never changes an existing one)      |
 | `pnpm clean`                              | Remove build output (`pnpm clean --deps` also removes `node_modules`)        |
 
 Git hooks (Husky): `pre-commit` lints and formats staged files, `pre-push` runs typecheck and tests.
@@ -97,15 +99,18 @@ accessdesk/
 │   │   │   │   ├── health/       /health (liveness) and /ready (readiness)
 │   │   │   │   ├── onboarding/   routes, service, the step pipeline (steps, template steps, runner,
 │   │   │   │   │                 audit observer), password generator
-│   │   │   │   └── templates/    routes, repository interface, Prisma repository
+│   │   │   │   └── templates/    routes, repository interface (including the default template
+│   │   │   │                     lookup), Prisma repository
 │   │   │   ├── plugins/          cross-cutting Fastify plugins: auth (JWT + role guard), jwks
 │   │   │   │                     (OIDC discovery of signing keys), error handler
 │   │   │   ├── app.ts            builds the app from its dependencies (used by tests too)
+│   │   │   ├── errors.ts         AppError (status, code, short message)
 │   │   │   └── server.ts         composition root: picks the real implementations
 │   │   └── test/
 │   │       ├── helpers/          signed-token harness, fakes (including in-memory audit and checklists),
 │   │       │                     app builder
-│   │       ├── integration/      HTTP-level tests with app.inject(), and the migration tests
+│   │       ├── integration/      HTTP-level tests with app.inject(), the migration tests and the
+│   │       │                     real-database repository tests (*.prisma.test.ts)
 │   │       └── unit/             services, mappers, repositories, config, key discovery
 │   └── desktop/                  Electron + React
 │       ├── src/
@@ -187,13 +192,13 @@ system design are explained in full in [coding-standards.md](coding-standards.md
   TEST_DATABASE_URL=postgresql://accessdesk:change-me@localhost:5432/postgres pnpm test:e2e
   ```
 
-- The exceptions to "no database" are `apps/api/test/integration/database-migrations.test.ts` (the
-  migrations are SQL, so it runs them on a real PostgreSQL) and
-  `apps/api/test/integration/checklists.prisma.test.ts` (the tick and close transactions, the rollback
-  when an audit row cannot be written, and the row lock need a real database). Each creates and drops its
-  own scratch database and is **skipped unless `TEST_DATABASE_URL` is set** (CI sets it). The Prisma
-  checklist repository also has mocked-client unit tests, so coverage does not depend on a database. Locally, with the Docker
-  database from `pnpm db:up`:
+- The exceptions to "no database" are three tests in `apps/api/test/integration/`:
+  `database-migrations.test.ts` (the migrations are SQL, so it runs them on a real PostgreSQL),
+  `checklists.prisma.test.ts` (the tick and close transactions, the rollback when an audit row cannot be
+  written, and the row lock need a real database) and `templates.prisma.test.ts` (finding the default
+  template). Each creates and drops its own scratch database and is **skipped unless
+  `TEST_DATABASE_URL` is set** (CI sets it). The Prisma repositories also have mocked-client unit tests,
+  so coverage does not depend on a database. Locally, with the Docker database from `pnpm db:up`:
 
   ```
   TEST_DATABASE_URL=postgresql://accessdesk:change-me@localhost:5432/postgres pnpm --filter @accessdesk/api test
@@ -207,6 +212,61 @@ system design are explained in full in [coding-standards.md](coding-standards.md
   (`main/index.ts`, `window.ts`) is excluded from unit coverage and exercised by the e2e test. The
   IPC wiring (`ipc.ts` and the preload) is not excluded: `test/unit/main/ipc-contract.test.ts` checks
   that every channel in `src/shared/ipc.ts` has a handler and a preload function.
+
+## Before you merge
+
+`pnpm check` and the pre-push hook are quick, but they do not run everything CI runs. They skip the
+database tests, the coverage thresholds and the dependency audit. Run the steps below on a clean,
+committed branch before you open or merge a pull request, so CI does not fail after you push.
+
+1. **Be up to date with `main`.**
+
+   ```
+   git fetch origin
+   git status                                              # nothing uncommitted
+   git rev-list --left-right --count HEAD...origin/main    # "<ahead> <behind>": behind must be 0
+   ```
+
+   If you are behind, rebase onto `origin/main` and run the steps again.
+
+2. **Start the database** with `pnpm db:up`, and set
+   `TEST_DATABASE_URL=postgresql://accessdesk:change-me@localhost:5432/postgres` for the steps below.
+   Without it the database tests are skipped, and CI runs them.
+
+3. **Run what CI runs**, in the same order as `.github/workflows/ci.yml`. `--force` makes Turborepo run
+   every task again instead of replaying a cached result.
+
+   ```
+   pnpm install --frozen-lockfile
+   pnpm lint
+   pnpm check:naming
+   pnpm format:check
+   pnpm exec turbo run typecheck --force
+   pnpm exec turbo run test:coverage --force
+   pnpm exec turbo run build --force
+   ```
+
+4. **Run the end-to-end test** with `pnpm test:e2e`. It must end with `N/N checks passed`.
+
+5. **Run the dependency audit** with `pnpm audit --audit-level high`. A high or critical advisory fails
+   the CI `audit` job. Check whether an open Dependabot pull request already fixes it.
+
+6. **Review the diff against the security rules.** Read `git diff origin/main...HEAD` with
+   [security.md](security.md) open. Look for tokens, passwords or personal data in logs and audit rows,
+   IPC payloads without Zod validation, and API routes without a role check
+   ([ADR 0006](adr/0006-ui-visibility-is-not-authorization.md)).
+
+### Before a release
+
+A release is made from `main` only, with `main` equal to `origin/main`. In addition to the steps above:
+
+- Make sure `CHANGELOG.md` has an entry for everything merged since the last tag:
+  `git log $(git describe --tags --abbrev=0)..HEAD --oneline`.
+- Bump the `version` in each `package.json` that changed.
+- Check every new migration in `apps/api/prisma/migrations/`. `db:deploy` runs it on production data, so
+  it must only add things, or come with a written plan for the data it changes.
+- Make sure `README.md` and `docs/` match any changed configuration or environment variables.
+- Check that the latest CI run on `main` is green: `gh run list --branch main --limit 3`.
 
 ## Adding a feature (API)
 

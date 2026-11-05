@@ -35,7 +35,7 @@ These are enforced in code and covered by tests where possible. Report vulnerabi
    looked up live when a screen needs them.
 8. **`.env` files are git-ignored.** Only `.env.example` is committed.
 9. **The desktop's reach into the API is narrow.** The renderer gets typed bridge methods only. The main
-   process reads six fixed paths (`/employees`, `/employees/<uuid>`, `/templates`,
+   process reads seven fixed paths (`/employees`, `/employees/filter-options`, `/employees/<uuid>`, `/templates`,
    `/onboarding/options`, `/checklists`, `/checklists/<uuid>`) and has four fixed writes (onboarding
    create and retry, ticking a checklist task, closing a checklist), each building its path from
    validated UUIDs and sending only what the shared schema keeps. A write is sent again only after a 401,

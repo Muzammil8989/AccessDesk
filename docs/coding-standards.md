@@ -111,8 +111,8 @@ This is checked by lint, not by good intentions.
    on `401` with a refreshed token.
 3. API route validates the query with `listEmployeesQuerySchema`, builds a service for this request with
    the caller's token.
-4. The service asks the `IdentityProvider` interface for users and a count, and maps them with
-   `toEmployee`.
+4. The service checks any group or role filter, asks the `IdentityProvider` interface for one page
+   (`listUsersPage`: users, total, capped), and maps them with `toEmployee`.
 5. Errors go to one error handler, which turns them into short, safe messages.
 6. The renderer parses the response with the shared schema before using it.
 
@@ -143,7 +143,7 @@ other two. So each kind of file has one job:
 The route reads like a sentence and contains no rules:
 
 ```ts
-app.get('/employees/:id', async (request): Promise<Employee> => {
+app.get('/employees/:id', async (request): Promise<EmployeeDetail> => {
   const { id } = employeeIdParamsSchema.parse(request.params); // validate
   return serviceFor(request).get(id); //                         delegate
 });
@@ -204,9 +204,10 @@ auth: Pick<AuthService, 'getAccessToken' | 'forceRefresh'>;
 // authService.ts: needs storage, so it depends on the interface, not the file-based class
 tokenStore: TokenStorage;
 
-// employeeRoutes: needs a way to get an identity provider, not the app's whole config
+// employeeRoutes: needs a way to get an identity provider and the API-wide rate limit, not the whole config
 export interface EmployeeRouteDeps {
   identityFor: IdentityProviderFactory;
+  rateLimitPerMinute: number;
 }
 ```
 
@@ -272,6 +273,8 @@ export interface TemplateRepository {
   /** All templates, by name, each with its items in order. */
   listWithItems(): Promise<Template[]>;
   findById(id: string): Promise<Template | null>;
+  /** The oldest template flagged as the default, or null when there is none. */
+  findDefault(): Promise<Template | null>;
 }
 ```
 
@@ -385,7 +388,7 @@ When adding a file, copy the style of its neighbours. Do not rename existing fil
 - Name magic numbers: `const EXPIRY_MARGIN_MS = 30_000;`.
 - Use `async`/`await`, not `.then` chains. Always `await` or deliberately `void` a promise
   (`process.on('SIGINT', () => void shutdown('SIGINT'))`); the linter catches the rest.
-- Run independent async work in parallel with `Promise.all`, as `EmployeesService.list` does.
+- Run independent async work in parallel with `Promise.all`, as `EmployeesService.get` does (groups and roles at once).
 - Classes are for things with state and injected dependencies (`AuthService`, `TokenStore`). Pure logic
   is a plain function (`toEmployee`, `canAccess`).
 - No circular imports. If two modules need each other, the shared part belongs in a third.
@@ -504,7 +507,7 @@ The conventions and folder layout are in [development.md](development.md#testing
 - **DRY (don't repeat yourself), applied to knowledge, not text.** The same _rule or shape_ must live in
   one place (a Zod schema, the role table). Two lines that merely look alike are fine to leave alone;
   merging them too early creates a bad abstraction that is harder to undo than the duplication.
-- **Law of Demeter.** Talk to your direct collaborators. `this.identity.listUsers(...)`, not
+- **Law of Demeter.** Talk to your direct collaborators. `this.identity.listUsersPage(...)`, not
   `this.deps.client.http.users.list(...)`.
 - **Composition over inheritance.** We inject collaborators instead of extending base classes. There is
   almost no inheritance in this repo; keep it that way.

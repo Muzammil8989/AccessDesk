@@ -2,8 +2,8 @@
 
 Electron + React desktop app (electron-vite, Tailwind, shadcn/ui-style components, React Hook Form,
 Zod, TanStack Query, React Router). The look follows the
-[design system](../../design-system/accessdesk/MASTER.md): light, dark or system theme, Inter bundled
-locally.
+[design system](../../design-system/accessdesk/MASTER.md): light, dark or system theme, Roboto Flex
+(variable) bundled locally.
 
 ```
 src/main/       main process: OIDC login (auth/), token + settings stores (store/), API client,
@@ -23,12 +23,13 @@ are in the token (`AUTH_ROLES_CLAIM_PATH`) come from the same `.env` variables a
 the same code, so the UI and the API agree.
 
 The renderer is sandboxed and never sees a token. It asks the main process for data through the preload
-bridge, and the main process adds the bearer token. The bridge has `api.get` for reads (six fixed paths
+bridge, and the main process adds the bearer token. The bridge has `api.get` for reads (seven fixed paths
 only) and, for writes, `api.onboarding.create`, `api.onboarding.retry`, `api.checklists.setItem` and
 `api.checklists.setClosed`: the main process builds those paths itself from validated UUIDs and validates
 the input. See [docs/security.md](../../docs/security.md).
 
-Screens: Employees, Onboard (template, manager and start date, the result with its checklist),
+Screens: Employees (search, status, group and role filters) and `/employees/:id` (one person's groups
+and roles), Onboard (template, manager and start date, the result with its checklist),
 `/onboard/checklists` (Open/Done list) and `/onboard/checklists/:subjectId`, plus Settings. Offboard,
 Access Review and Audit Log are placeholders.
 

@@ -23,12 +23,13 @@ Admin API address and the realm from it, and refuses to start if the URL does no
    onboarding (see "Who may be given which role" below).
 4. **Admin API permissions.** The API calls Keycloak with the logged-in admin's own token, so that admin
    needs the relevant `realm-management` client roles:
-   - `view-users`: the Employees list, the manager search, and the names shown on checklists (a user
-     looked up by ID).
+   - `view-users`: the Employees list, the manager search, the names shown on checklists (a user
+     looked up by ID), an employee's groups and roles, and the members of a group or role used as a filter.
    - `manage-users`: onboarding (create the user, add them to a group, assign a role).
-   - `query-groups`: list the groups (the departments, and the groups a template names).
+   - `query-groups`: list the groups (the departments, the groups a template names, and the Employees
+     group filter).
    - `view-realm`: look up a realm role by name, and list the realm's roles (a template's roles are
-     checked before they are assigned).
+     checked before they are assigned, and the Employees role filter).
 
    Without them the app shows Keycloak's "forbidden" answer. These onboarding permissions have not yet
    been checked against a real Keycloak (see "Checks to run" below).
