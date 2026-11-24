@@ -84,7 +84,7 @@ jobs:
       # Compares the lockfile before and after the pull request. Fails only when the pull request
       # adds a dependency with a known high or critical vulnerability. Older problems are caught by
       # "pnpm audit" in ci.yml.
-      - uses: actions/dependency-review-action@v5.0.0
+      - uses: actions/dependency-review-action@v5.0.1
         with:
           fail-on-severity: high
           comment-summary-in-pr: never
